@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { isIP } from 'node:net'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import bcrypt from 'bcryptjs'
@@ -8,6 +9,7 @@ const execFileAsync = promisify(execFile)
 
 type SetupBody = {
   setupToken?: string
+  database?: { host?: string; port?: number; username?: string; password?: string; name?: string }
   databaseUrl?: string
   adminName?: string
   adminEmail?: string
@@ -37,6 +39,51 @@ function readDatabaseUrl(value: unknown): string {
   return raw
 }
 
+function readStructuredDatabase(value: SetupBody['database']): string {
+  const host = readString(value?.host, 'DB_HOST')
+  const port = Number(value?.port ?? 3306)
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('DB_PORT_INVALID')
+  const username = readString(value?.username, 'DB_USERNAME')
+  const password = typeof value?.password === 'string' ? value.password : ''
+  const name = readString(value?.name, 'DB_NAME')
+  if (/[\\/\s`]/u.test(name)) throw new Error('DB_NAME_INVALID')
+  const hostPart = isIP(host) === 6 ? `[${host}]` : host
+  return `mysql://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${hostPart}:${port}/${name}`
+}
+
+/**
+ * 在 prisma db push 之前确认目标数据库存在：先直连目标库，若返回
+ * "Unknown database"（errno 1049）则改连服务器并 CREATE DATABASE IF NOT EXISTS，
+ * 让表单里填写的新库名可以直接生效；其他错误原样抛出。
+ */
+async function ensureMysqlDatabase(databaseUrl: string): Promise<void> {
+  const url = new URL(databaseUrl)
+  const database = decodeURIComponent(url.pathname.replace(/^\//u, ''))
+  if (!database) return
+  const { createConnection } = await import('mysql2/promise')
+  const connectionOptions = {
+    host: url.hostname.replace(/^\[(.*)\]$/u, '$1'),
+    port: Number(url.port || 3306),
+    user: decodeURIComponent(url.username),
+    password: decodeURIComponent(url.password),
+    connectTimeout: 10_000,
+  }
+  try {
+    const connection = await createConnection({ ...connectionOptions, database })
+    await connection.end()
+    return
+  } catch (error) {
+    if ((error as { errno?: number })?.errno !== 1049) throw error
+  }
+  const escapedName = database.replaceAll('`', '``')
+  const connection = await createConnection(connectionOptions)
+  try {
+    await connection.query(`CREATE DATABASE IF NOT EXISTS \`${escapedName}\` CHARACTER SET utf8mb4`)
+  } finally {
+    await connection.end()
+  }
+}
+
 function readPositiveNumber(value: unknown, field: string, fallback: number, minimum: number): number {
   const parsed = value === undefined || value === '' ? fallback : Number(value)
   if (!Number.isFinite(parsed) || parsed < minimum) throw new Error(`${field}_INVALID`)
@@ -61,7 +108,9 @@ export async function POST(request: NextRequest) {
 
   let client: import('@prisma/client').PrismaClient | null = null
   try {
-    const databaseUrl = readDatabaseUrl(body.databaseUrl)
+    const databaseUrl = body.database
+      ? readStructuredDatabase(body.database)
+      : readDatabaseUrl(body.databaseUrl)
     const adminName = readString(body.adminName, 'ADMIN_NAME')
     const adminEmail = readString(body.adminEmail, 'ADMIN_EMAIL')
     const adminPassword = readString(body.adminPassword, 'ADMIN_PASSWORD', 10)
@@ -75,6 +124,7 @@ export async function POST(request: NextRequest) {
     const port = Number(body.redis?.port ?? 6379)
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('REDIS_PORT_INVALID')
 
+    await ensureMysqlDatabase(databaseUrl)
     await execFileAsync('npx', ['prisma', 'db', 'push', '--skip-generate'], {
       cwd: process.cwd(),
       env: { ...process.env, DATABASE_URL: databaseUrl },
@@ -126,7 +176,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, restartRequired: true })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'SETUP_FAILED'
-    return NextResponse.json({ error: { code: message.slice(0, 160) } }, { status: 400 })
+    return NextResponse.json({ error: { code: message.slice(0, 160), message: message.slice(0, 400) } }, { status: 400 })
   } finally {
     await client?.$disconnect().catch(() => undefined)
   }

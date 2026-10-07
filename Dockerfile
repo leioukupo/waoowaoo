@@ -27,6 +27,11 @@ ENV DEPLOYMENT_EDITION=$DEPLOYMENT_EDITION
 # build. Copying the source here keeps the ee/ input optional: an exported OSS
 # tree with ee/ physically absent still builds this same Dockerfile.
 COPY . .
+# ffmpeg-ffprobe-static's install script downloads its release binaries from
+# GitHub. On networks where GitHub is unreachable, point it at a local mirror
+# (the script honors this base URL natively); empty keeps the GitHub default.
+ARG FFMPEG_FFPROBE_STATIC_BASE_URL=
+ENV FFMPEG_FFPROBE_STATIC_BASE_URL=$FFMPEG_FFPROBE_STATIC_BASE_URL
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --prefer-offline
 RUN --mount=type=cache,target=/root/.npm \
@@ -46,6 +51,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
       || echo "Optional gosu/tini packages unavailable; entrypoint fallbacks will be used" >&2'
 
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+# CLI >= 25 routes `docker build` through the buildx plugin; carry the plugins
+# along so in-container builds work.
+COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/ /usr/libexec/docker/cli-plugins/
 COPY --chown=root:root docker/development/entrypoint.sh /usr/local/bin/waoowaoo-dev-entrypoint
 RUN chmod 0755 /usr/local/bin/waoowaoo-dev-entrypoint
 
@@ -78,8 +86,10 @@ COPY --chown=node:node --from=builder /app ./
 
 # The Web process starts one short-lived, restricted Codex container only while
 # a project is active. The Docker daemon remains a host concern; this image only
-# carries the client used by the Runtime Session Manager.
+# carries the client used by the Runtime Session Manager. CLI >= 25 routes
+# `docker build` through the buildx plugin, so the plugins travel with it.
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/ /usr/libexec/docker/cli-plugins/
 
 RUN mkdir -p /app/data /app/logs \
     && touch /app/.env \

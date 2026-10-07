@@ -46,10 +46,15 @@ long-lived service.
 The self-hosted overlay starts Caddy with the application and derives the application's `NEXTAUTH_URL` from `SELF_HOSTED_HOST` and `SELF_HOSTED_HTTPS_PORT`. Do not separately set a different browser origin for this release path. Caddy terminates HTTPS and forwards to `http://app:3000`; container-internal application traffic remains HTTP. Keep using the configured hostname in the browser so it matches the certificate and authentication origin.
 
 Do not add a minimal bootstrap secret to the environment. During first boot open
-`/setup?token=...` using the token printed by the Web container and enter the
-external service URLs, the first administrator account, and optional Runtime
-limits. The setup form tests MySQL, pushes the schema, creates the administrator,
-and stores the encrypted configuration. Restart the Web container after saving;
+the setup page (`/setup`, or `/setup?token=...` to prefill the one-time token
+printed by the Web container) and enter the one-time token, the external
+services (MySQL host/port/user/password/database name, Redis, Temporal,
+RustFS/S3), the first administrator account, and optional Runtime limits. The
+optional "service probe" on the same page checks the default ports
+(MySQL 3306, Redis 6379, Temporal 7233, RustFS/S3 9000) of one host and
+prefills the fields for services it finds. The setup form tests MySQL (creating
+the database when missing), pushes the schema, creates the administrator, and
+stores the encrypted configuration. Restart the Web container after saving;
 MySQL changes made later also require a restart, while Redis, Temporal and S3
 changes hot-reload.
 
