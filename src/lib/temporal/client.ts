@@ -28,17 +28,23 @@ export async function connectTemporalClient(
 }
 
 const globalForTemporal = globalThis as typeof globalThis & {
-  __waoowaooTemporalClientPromise?: Promise<Client>
+  __waoowaooTemporalConnectionPromise?: Promise<ConnectedTemporalClient>
+}
+
+export async function resetTemporalClient(): Promise<void> {
+  const connection = await globalForTemporal.__waoowaooTemporalConnectionPromise?.catch(() => undefined)
+  globalForTemporal.__waoowaooTemporalConnectionPromise = undefined
+  await connection?.close()
 }
 
 export async function getTemporalClient(): Promise<Client> {
-  if (!globalForTemporal.__waoowaooTemporalClientPromise) {
-    globalForTemporal.__waoowaooTemporalClientPromise = connectTemporalClient()
-      .then(({ client }) => client)
+  if (!globalForTemporal.__waoowaooTemporalConnectionPromise) {
+    globalForTemporal.__waoowaooTemporalConnectionPromise = connectTemporalClient()
       .catch((error: unknown) => {
-        delete globalForTemporal.__waoowaooTemporalClientPromise
+        delete globalForTemporal.__waoowaooTemporalConnectionPromise
         throw error
       })
   }
-  return await globalForTemporal.__waoowaooTemporalClientPromise
+  const connected = await globalForTemporal.__waoowaooTemporalConnectionPromise
+  return connected.client
 }

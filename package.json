@@ -36,6 +36,7 @@
     "architecture:durable-budget": "node scripts/check-durable-kernel-budget.mjs",
     "architecture:failure-governance": "tsx --tsconfig tsconfig.runtime-scripts.json scripts/check-failure-governance.ts",
     "runtime:codex:smoke": "tsx scripts/codex-runtime-smoke.ts",
+    "runtime:codex:build": "node scripts/ensure-codex-runtime-image.mjs",
     "runtime:codex:container-smoke": "tsx scripts/codex-runtime-container-smoke.ts",
     "runtime:codex:gateway-error-smoke": "tsx scripts/codex-gateway-error-smoke.ts",
     "runtime:self-hosted:smoke": "cross-env DEPLOYMENT_EDITION=self-hosted PROVIDER_CREDENTIAL_MODE=user-key BILLING_MODE=OFF npm run edition:prepare && cross-env DEPLOYMENT_EDITION=self-hosted PROVIDER_CREDENTIAL_MODE=user-key BILLING_MODE=OFF tsx --tsconfig .generated/edition/tsconfig.json scripts/edition/self-hosted-runtime-smoke.ts",

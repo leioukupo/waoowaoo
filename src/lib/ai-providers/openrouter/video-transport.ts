@@ -176,3 +176,19 @@ export function createOpenRouterVideoClient(input: {
     timeoutMs: input.timeoutMs,
   })
 }
+
+/** Best-effort cancellation for providers exposing the OpenRouter video job API. */
+export async function cancelOpenRouterVideoRequest(input: {
+  baseUrl: string
+  apiKey: string
+  requestId: string
+}): Promise<void> {
+  const endpoint = `${input.baseUrl.replace(/\/+$/u, '')}/videos/${encodeURIComponent(input.requestId)}`
+  const response = await fetchWithProviderProxy(endpoint, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${input.apiKey}` },
+    signal: AbortSignal.timeout(60_000),
+  })
+  if (response.ok || response.status === 404 || response.status === 409) return
+  throw new Error(`OPENROUTER_VIDEO_CANCEL_FAILED:${response.status}`)
+}

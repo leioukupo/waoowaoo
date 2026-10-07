@@ -22,55 +22,69 @@ Clone the public repository at the chosen release tag, or extract its source arc
 
 Copy `.env.example` to `.env` only for a new installation. Read every variable and replace placeholder credentials with distinct cryptographically random secrets. Never print the final `.env`, upload it, or include it in support logs. Keep it readable only by the installing account.
 
+The default release path starts only the Web container and keeps MySQL,
+Redis, Temporal, RustFS/S3 and the Temporal Worker external. Copy the example
+file without filling infrastructure secrets; the Web container generates its
+bootstrap secrets in `./data` and prints a one-time setup token.
+
 Set at least:
 
 | Setting | Value |
 | --- | --- |
-| `COMPOSE_FILE` | `docker-compose.yml:docker-compose.self-hosted.yml` |
+| `COMPOSE_FILE` | `docker-compose.yml:docker-compose.web.yml` |
 | `COMPOSE_PATH_SEPARATOR` | `:` (run in a POSIX shell, including WSL2) |
 | `DEPLOYMENT_EDITION` | `self-hosted` |
-| `APP_IMAGE` | Application `repository@sha256:…` from this release |
-| `TEMPORAL_WORKER_BLUE_IMAGE`, `TEMPORAL_WORKER_GREEN_IMAGE` | The same application digest for the first installation |
-| `CODEX_RUNTIME_IMAGE` | Separate Codex runtime `repository@sha256:…` from this release |
-| `TEMPORAL_WORKER_BLUE_BUILD_ID` | Unique release identity, such as the release tag plus the application digest prefix; not `local` |
-| Worker replicas | Blue `1`, green `0` for the first installation |
-| `SELF_HOSTED_HOST` | `localhost` |
-| `SELF_HOSTED_HTTPS_PORT` | `1443`; the browser opens `https://localhost:1443` |
-| `APP_HOST_PORT` | `13000`; HTTP redirect only, not a direct application endpoint |
-| `CODEX_RUNTIME_HOST_ROOT` | An absolute durable host directory; create it and ensure container UID 1000 can write to it |
-| `DOCKER_SOCKET_PATH` | The Docker socket accessible on this machine |
+| `APP_IMAGE` | Optional when the Web overlay builds `Dockerfile` locally |
+| `DOCKER_SOCKET_PATH` | Optional; omit it to keep Codex disabled until Docker is available |
 
-Use the release's verified image references, not the all-zero digests in the example file and not a mutable `latest` reference. Pull **both** the application and Codex runtime images before startup. Compose does not directly start the runtime image; the application starts it when a project needs the Assistant.
+When using published images, use the release's verified immutable references,
+not the all-zero digests in the example file and not a mutable `latest`
+reference. The default Web-only overlay builds the Web and local Codex Runtime
+images from the release snapshot; Compose does not run the Runtime image as a
+long-lived service.
 
 The self-hosted overlay starts Caddy with the application and derives the application's `NEXTAUTH_URL` from `SELF_HOSTED_HOST` and `SELF_HOSTED_HTTPS_PORT`. Do not separately set a different browser origin for this release path. Caddy terminates HTTPS and forwards to `http://app:3000`; container-internal application traffic remains HTTP. Keep using the configured hostname in the browser so it matches the certificate and authentication origin.
 
-Generate `MYSQL_PASSWORD`, `MYSQL_ROOT_PASSWORD`, `REDIS_PASSWORD`, `TEMPORAL_MYSQL_PASSWORD`, `MINIO_ROOT_PASSWORD`, `MINIO_APP_SECRET_KEY`, `NEXTAUTH_SECRET`, `CRON_SECRET`, and `API_ENCRYPTION_KEY`. Preserve the encryption key across upgrades so saved API credentials remain readable. Hex secrets avoid URL and shell escaping problems.
+Do not add a minimal bootstrap secret to the environment. During first boot open
+`/setup?token=...` using the token printed by the Web container and enter the
+external service URLs, the first administrator account, and optional Runtime
+limits. The setup form tests MySQL, pushes the schema, creates the administrator,
+and stores the encrypted configuration. Restart the Web container after saving;
+MySQL changes made later also require a restart, while Redis, Temporal and S3
+changes hot-reload.
 
-Set matching database credentials in both `DATABASE_URL` (host-side MySQL address, default port `13306`) and `COMPOSE_DATABASE_URL` (container-side `mysql:3306`). URL-encode credentials if they contain special characters. Keep infrastructure and Web bind addresses on `127.0.0.1` for a local installation. If you change ports or the Compose project name, use those values consistently for every command.
+MySQL credentials are entered in `/setup` or the administrator's personal
+center, then encrypted under `./data`; they are no longer required in `.env`.
 
 The runtime directory must refer to the same host path from both Docker and the application container. For Docker Desktop, ensure that path is shareable with Docker. Do not use a temporary directory for durable projects.
 
 ## 3. Start using the existing bootstrap entry
 
-Run from the installation directory after completing `.env`:
+Run from the installation directory after copying `.env.example` to `.env`:
 
 ```sh
 # Validate without printing the resolved configuration (which contains secrets).
 docker compose config --quiet
-# Pull each immutable image reference chosen above, including the Codex runtime.
-# docker pull <application-repository@sha256:digest>
-# docker pull <runtime-repository@sha256:digest>
-sh scripts/temporal/worker-rollout.sh bootstrap blue
-docker compose up -d
-sh scripts/temporal/worker-rollout.sh status
+# Build the Web image and run the only long-lived Compose service.
+docker compose up -d --build
 docker compose ps -a
 ```
 
-Compose initializes MySQL, Redis, Temporal and its namespace, the application schema, and private MinIO storage, and starts Caddy as the browser entry point. The rollout script establishes the first Current Worker Version before Web starts. Do not manually run a schema push before the database is available, and do not replace the rollout entry with ad hoc Worker commands.
+Follow the printed setup URL. The Web process also attempts to build or reuse
+the local Codex Runtime image with a source fingerprint; a failed build leaves
+the settings and ordinary Web features usable and marks Codex unavailable.
+Temporal Workers remain an independent deployment and read the shared encrypted
+configuration file when it is mounted. To opt into the bundled MySQL/Redis/
+Temporal/MinIO/Caddy stack, use `docker-compose.self-hosted.yml` and the legacy
+immutable-image variables described below.
 
 Inspect failing container logs without disclosing secrets. Confirm initialization services exited successfully, long-running services are healthy, and the Worker version is current. Complete certificate trust and browser verification below before considering installation successful.
 
-### Trust this installation's local certificate
+The Web-only default is available at `http://localhost:13000` (or the
+`APP_HOST_PORT` you chose). The following Caddy certificate and HTTP/2 checks
+apply only when you explicitly select `docker-compose.self-hosted.yml`.
+
+### Optional: trust the self-hosted Caddy certificate
 
 Caddy creates a local certificate authority. Trust inside its container does not automatically apply to your browser's host. Export **only its public root certificate** to a new local directory:
 
@@ -90,7 +104,7 @@ The AI installer must explain that trusting this CA changes the host's certifica
 
 A browser with a separate certificate store may need its own import. See [Caddy's Docker certificate guidance](https://caddyserver.com/docs/running#local-https-with-docker). Keep the certificate private key in Caddy's persistent storage; never attach it to support requests.
 
-### Verify the actual browser connection
+### Optional: verify the Caddy browser connection
 
 Open **https://localhost:1443** without a certificate warning. `http://localhost:13000` should redirect there while preserving the path. If you changed the host or ports, use the configured values instead.
 
@@ -124,6 +138,15 @@ Alternate blue and green on subsequent upgrades. The same env file, Compose file
 ## 5. Optional: build from source
 
 For a customized release, build **both** `Dockerfile` and `Dockerfile.codex-runtime`, publish them to a registry you control, and resolve their immutable digests. Feed those digests into the same installation process above. The versioned Compose path uses immutable images and does not build Worker slots from a local source directory.
+
+For a local Web-only image, prebuild the project-scoped Codex runtime before
+starting Compose. The image name must match `CODEX_RUNTIME_IMAGE` in the Web
+overlay environment:
+
+```sh
+CODEX_RUNTIME_BUILD_IMAGE=waoowaoo-codex-runtime:local npm run runtime:codex:build
+docker compose -f docker-compose.yml -f docker-compose.web.yml up -d
+```
 
 For source development, install Node.js 22+ and npm, create and configure `.env`, set `NEXTAUTH_URL=http://localhost:3001`, then run:
 

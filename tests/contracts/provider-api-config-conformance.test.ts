@@ -69,4 +69,17 @@ describe('API config provider registry conformance', () => {
       })
     }
   })
+
+  it('accepts a custom OpenRouter channel while retaining its full identity', () => {
+    expect(normalizeProvidersInput([{
+      id: 'openrouter:third-party',
+      name: 'Third-party OpenRouter',
+      baseUrl: 'https://router.example/v1',
+    }])).toEqual([{
+      id: 'openrouter:third-party',
+      name: 'Third-party OpenRouter',
+      baseUrl: 'https://router.example/v1',
+      apiKey: undefined,
+    }])
+  })
 })

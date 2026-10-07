@@ -1,0 +1,58 @@
+# Web-only Compose overlay.
+#
+# Use this file with the base/edition files when the infrastructure is managed
+# outside Compose:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.web.yml up -d
+#
+# Do not include docker-compose.self-hosted.yml for this path unless you also
+# opt into its `infra` profile; that overlay intentionally sets the browser
+# origin and S3 endpoint for the bundled Caddy/MinIO deployment.
+#
+# The app command is intentionally the plain Next.js server. Storage
+# initialization, schema/bootstrap jobs, Redis, Temporal and object storage
+# are all external concerns in this mode.
+
+services:
+  app:
+    image: waoowaoo-web:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+    depends_on: !reset []
+    command: ["npm", "run", "start:next"]
+    environment:
+      WAO_DATA_DIR: /app/data
+      CODEX_RUNTIME_BUILD_CONTEXT: /app
+      CODEX_RUNTIME_BUILD_IMAGE: waoowaoo-codex-runtime:local
+      CODEX_RUNTIME_IMAGE: waoowaoo-codex-runtime:local
+    volumes:
+      - ./data:/app/data
+      - ./docker-logs:/app/logs
+      - "${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock"
+      - type: bind
+        source: "${CODEX_RUNTIME_HOST_ROOT:-/var/lib/wao/codex-runtime}"
+        target: "${CODEX_RUNTIME_HOST_ROOT:-/var/lib/wao/codex-runtime}"
+
+  # Keep infrastructure available as an explicit opt-in profile for operators
+  # who use the same Compose files for local bootstrap. It is excluded from a
+  # plain `docker compose ... up` in web-only mode.
+  mysql:
+    profiles: ["infra"]
+  redis:
+    profiles: ["infra"]
+  app-schema:
+    profiles: ["infra"]
+  temporal-db-bootstrap:
+    profiles: ["infra"]
+  temporal-schema:
+    profiles: ["infra"]
+  temporal-config:
+    profiles: ["infra"]
+  temporal:
+    profiles: ["infra"]
+  temporal-create-namespace:
+    profiles: ["infra"]
+  temporal-verify-worker-version:
+    profiles: ["infra"]

@@ -10,7 +10,12 @@ import type {
   AiLlmStreamCallbacks,
   ChatMessage,
 } from '@/lib/ai-registry/types'
-import { getProviderConfig, resolveModelSelection, resolveFrozenModelSelection } from '@/lib/user-api/runtime-config'
+import {
+  getProviderConfig,
+  resolveModelSelection,
+  resolveFrozenModelSelection,
+  resolveOpenRouterChannelRouteSet,
+} from '@/lib/user-api/runtime-config'
 import {
   resolveAiProviderAdapter,
   runRegisteredProviderOperation,
@@ -350,7 +355,8 @@ export async function executeMediaGeneration(
     result = await buildObservedRoute(selection).execute()
   } else {
     if (!invocation) throw new Error(`TASK_PROVIDER_INVOCATION_KEY_REQUIRED:${taskId}:${input.modality}`)
-    const routeSet = resolveProviderRouteSet(input.modality, selection.modelKey)
+    const routeSet = await resolveOpenRouterChannelRouteSet(input.userId, input.modality, selection)
+      ?? resolveProviderRouteSet(input.modality, selection.modelKey)
     const compatibleRoutes = input.modality === 'image' || input.modality === 'video'
       ? resolveCompatibleMediaProviderRoutes({
           routeSet,

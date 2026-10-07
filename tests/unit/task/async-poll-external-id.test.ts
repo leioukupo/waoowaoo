@@ -88,4 +88,21 @@ describe('async poll externalId contract', () => {
     expect(parsed.type).toBe('VIDEO')
     expect(parsed.requestId).toBe('job_789')
   })
+
+  it('preserves a custom OpenRouter channel in the durable externalId', () => {
+    const externalId = formatExternalId(
+      'OPENROUTER',
+      'VIDEO',
+      'job_custom',
+      undefined,
+      'openrouter:third-party',
+    )
+    expect(externalId).toBe('OPENROUTER:VIDEO:job_custom:provider=openrouter%3Athird-party')
+
+    const parsed = parseExternalId(externalId)
+    expect(parsed.provider).toBe('OPENROUTER')
+    expect(parsed.type).toBe('VIDEO')
+    expect(parsed.requestId).toBe('job_custom')
+    expect(parsed.providerToken).toBe('openrouter:third-party')
+  })
 })

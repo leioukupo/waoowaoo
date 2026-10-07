@@ -17,6 +17,10 @@ const storageLogger = createScopedLogger({
 
 let providerSingleton: StorageProvider | null = null
 
+export function resetStorageProvider(): void {
+  providerSingleton = null
+}
+
 export function getStorageProvider(): StorageProvider {
   if (!providerSingleton) {
     providerSingleton = new S3StorageProvider()

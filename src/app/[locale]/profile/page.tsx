@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import Navbar from '@/components/Navbar'
 import ApiConfigTab from './components/ApiConfigTab'
+import InfrastructureSettingsTab from './components/InfrastructureSettingsTab'
 import ProfileSidebar, { type ProfileSectionItem } from './components/ProfileSidebar'
 import type {
   ProfileBalanceSummary,
@@ -76,12 +77,13 @@ function getDefaultProfileSection(features: PublicDeploymentFeatures): ProfileSe
   if (features.showBilling) return 'overview'
   if (features.showAccountSecurity) return 'security'
   if (features.showApiConfig) return 'apiConfig'
-  return 'overview'
+  return 'infrastructure'
 }
 
 function isProfileSectionEnabled(section: ProfileSection, features: PublicDeploymentFeatures): boolean {
   if (section === 'security') return features.showAccountSecurity
   if (section === 'apiConfig') return features.showApiConfig
+  if (section === 'infrastructure') return true
   return features.showBilling
 }
 
@@ -276,6 +278,7 @@ function ProfilePageContent() {
     ...(deploymentFeatures?.showApiConfig === true
       ? [{ section: 'apiConfig' as const, icon: 'settingsHexAlt' as const, label: t('apiConfig') }]
       : []),
+    { section: 'infrastructure' as const, icon: 'settingsHexAlt' as const, label: t('infrastructure') },
     ...(deploymentFeatures?.showBilling === true
       ? [{ section: 'billing' as const, icon: 'receipt' as const, label: t('accountTransactions') }]
       : []),
@@ -326,6 +329,10 @@ function ProfilePageContent() {
             ) : activeSection === 'apiConfig' && deploymentFeatures.showApiConfig ? (
               <div className="glass-surface-elevated overflow-hidden">
                 <ApiConfigTab />
+              </div>
+            ) : activeSection === 'infrastructure' ? (
+              <div className="glass-surface-elevated overflow-hidden">
+                <InfrastructureSettingsTab />
               </div>
             ) : activeSection === 'overview' && showBilling ? (
               <ProfileOverviewSection

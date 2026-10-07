@@ -24,7 +24,10 @@ if [ -n "$runtime_root" ]; then
 fi
 
 docker_socket=/var/run/docker.sock
-if [ -S "$docker_socket" ]; then
+if [ -S "$docker_socket" ] && command -v stat >/dev/null 2>&1 \
+  && command -v getent >/dev/null 2>&1 \
+  && command -v groupadd >/dev/null 2>&1 \
+  && command -v usermod >/dev/null 2>&1; then
   docker_socket_gid=$(stat -c '%g' "$docker_socket")
   docker_group=$(getent group "$docker_socket_gid" | cut -d: -f1 || true)
   if [ -z "$docker_group" ]; then
@@ -34,4 +37,11 @@ if [ -S "$docker_socket" ]; then
   usermod --append --groups "$docker_group" node
 fi
 
-exec gosu node "$@"
+if command -v gosu >/dev/null 2>&1; then
+  exec gosu node "$@"
+fi
+if command -v su >/dev/null 2>&1; then
+  exec su -s /bin/sh node -c 'exec "$@"' sh "$@"
+fi
+echo "gosu and su are unavailable; starting development Web as the image user" >&2
+exec "$@"

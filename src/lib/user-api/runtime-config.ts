@@ -32,6 +32,7 @@ import {
   hasStoredProviderCredential,
   assertSingleMediaModelSelections,
 } from '@/lib/user-api/effective-config'
+import type { AiProviderRouteSet } from '@/lib/ai-registry/provider-route-set'
 
 export interface CustomModel {
   modelId: string
@@ -108,7 +109,7 @@ function normalizeStoredModel(raw: unknown, index: number): CustomModel {
   const parsed = assertModelKey(modelKeyRaw, `customModels[${index}].modelKey`)
 
   const modelId = parsed.modelId
-  const provider = parsed.provider
+  const provider = parsed.provider.toLowerCase()
   if (!isApiConfigCatalogProviderId(provider)) {
     throw new Error(`MODEL_PROVIDER_UNSUPPORTED: customModels[${index}].provider`)
   }
@@ -120,7 +121,7 @@ function normalizeStoredModel(raw: unknown, index: number): CustomModel {
 
   return {
     modelId,
-    modelKey: parsed.modelKey,
+    modelKey: `${provider}::${modelId}`,
     provider,
     type: typeRaw,
     name: readTrimmedString(Reflect.get(raw, 'name')) || modelId,
@@ -270,6 +271,39 @@ export async function getProviderConfig(userId: string, providerId: string): Pro
 export async function getUserModelsForExistingExecution(userId: string): Promise<CustomModel[]> {
   if (isPlatformProviderCredentialMode()) return getPlatformEnabledModels()
   return (await readStoredUserConfig(userId)).models
+}
+
+/**
+ * Build a durable pre-accept failover set for equivalent OpenRouter channels.
+ * The saved provider order is the channel priority; the selected channel stays
+ * primary so a frozen model selection remains authoritative for the task.
+ */
+export async function resolveOpenRouterChannelRouteSet(
+  userId: string,
+  modelType: ModelMediaType,
+  selected: { provider: string; modelId: string; modelKey: string },
+): Promise<AiProviderRouteSet | null> {
+  if (isPlatformProviderCredentialMode()) return null
+  const stored = await readUserConfig(userId)
+  const channelIds = stored.providers
+    .filter((provider) => getProviderFamily(provider.id).toLowerCase() === 'openrouter')
+    .map((provider) => provider.id)
+  const candidates = channelIds.filter((providerId) => stored.models.some((model) => (
+    model.type === modelType && model.modelId === selected.modelId && model.provider === providerId
+  )))
+  if (!candidates.includes(selected.provider) || candidates.length < 2) return null
+  const ordered = [selected.provider, ...candidates.filter((providerId) => providerId !== selected.provider)]
+  return {
+    logicalCapabilityId: `openrouter:${modelType}:${selected.modelId}`,
+    primaryModelKey: selected.modelKey,
+    failoverPolicy: 'pre_accept_only',
+    routes: ordered.map((provider, priority) => ({
+      provider,
+      modelId: selected.modelId,
+      modelKey: `${provider}::${selected.modelId}`,
+      priority,
+    })),
+  }
 }
 
 export async function getUserModels(userId: string): Promise<CustomModel[]> {

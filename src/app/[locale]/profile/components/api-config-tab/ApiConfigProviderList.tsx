@@ -1,7 +1,7 @@
 'use client'
 
-import type { CSSProperties, ReactNode } from 'react'
-import { useCallback, useMemo, useState } from 'react'
+import type { CSSProperties, FormEvent, ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   DndContext,
   KeyboardSensor,
@@ -20,6 +20,7 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import { AppIcon } from '@/components/ui/icons'
 import type { CustomModel, Provider } from '../api-config'
+import type { OpenRouterChannelDraft } from '../api-config/provider-card/types'
 import { ProviderCard } from '../api-config'
 
 interface DefaultModels {
@@ -32,6 +33,8 @@ interface ApiConfigProviderListProps {
   defaultModels: DefaultModels
   getModelsForProvider: (providerId: string) => CustomModel[]
   onUpdateApiKey: (providerId: string, apiKey: string) => void
+  onUpdateBaseUrl: (providerId: string, baseUrl: string) => void
+  onAddOpenRouterChannel: (draft: OpenRouterChannelDraft) => boolean
   onReorderProviders: (activeProviderId: string, overProviderId: string) => void
   onDeleteModel: (modelKey: string, providerId: string) => void
   onUpdateModel: (modelKey: string, updates: Partial<CustomModel>, providerId: string) => void
@@ -42,6 +45,15 @@ interface ApiConfigProviderListProps {
     providerPoolHint: string
     dragToSort: string
     moreProviders: string
+    addOpenRouterChannel: string
+    addOpenRouterChannelHint: string
+    channelName: string
+    channelSlug: string
+    apiKeyLabel: string
+    enterApiKey: string
+    baseUrl: string
+    save: string
+    cancel: string
   }
 }
 
@@ -50,6 +62,34 @@ export function ApiConfigProviderList(props: ApiConfigProviderListProps) {
   const { modelProviders, allModels, getModelsForProvider, labels } = props
   const [expandedProviderId, setExpandedProviderId] = useState<string | null>(null)
   const [showMoreProviders, setShowMoreProviders] = useState(false)
+  const [showAddOpenRouterChannel, setShowAddOpenRouterChannel] = useState(false)
+  const openRouterProvider = modelProviders.find((provider) => provider.id === 'openrouter')
+  const [channelDraft, setChannelDraft] = useState<OpenRouterChannelDraft>({
+    slug: '',
+    name: '',
+    baseUrl: openRouterProvider?.baseUrl ?? '',
+    apiKey: '',
+  })
+
+  useEffect(() => {
+    if (!channelDraft.baseUrl && openRouterProvider?.baseUrl) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Fill the
+      // channel form default after the catalog provider arrives asynchronously.
+      setChannelDraft((previous) => ({ ...previous, baseUrl: openRouterProvider.baseUrl ?? '' }))
+    }
+  }, [channelDraft.baseUrl, openRouterProvider?.baseUrl])
+
+  const handleAddOpenRouterChannel = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!props.onAddOpenRouterChannel(channelDraft)) return
+    setChannelDraft({
+      slug: '',
+      name: '',
+      baseUrl: openRouterProvider?.baseUrl ?? '',
+      apiKey: '',
+    })
+    setShowAddOpenRouterChannel(false)
+  }
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -62,7 +102,11 @@ export function ApiConfigProviderList(props: ApiConfigProviderListProps) {
   }, [props])
 
   const extensionProviders = useMemo(
-    () => modelProviders.filter((provider) => provider.featured !== true && !provider.hasApiKey),
+    () => modelProviders.filter((provider) => (
+      provider.featured !== true
+      && !provider.hasApiKey
+      && !provider.id.startsWith('openrouter:')
+    )),
     [modelProviders],
   )
   const primaryProviders = useMemo(() => {
@@ -80,6 +124,7 @@ export function ApiConfigProviderList(props: ApiConfigProviderListProps) {
       expanded={expandedProviderId === provider.id}
       onExpandChange={(expanded) => setExpandedProviderId(expanded ? provider.id : null)}
       onUpdateApiKey={props.onUpdateApiKey}
+      onUpdateBaseUrl={props.onUpdateBaseUrl}
       onDeleteModel={(modelKey) => props.onDeleteModel(modelKey, provider.id)}
       onUpdateModel={(modelKey, updates) => props.onUpdateModel(modelKey, updates, provider.id)}
       onDeleteProvider={props.onDeleteProvider}
@@ -97,7 +142,77 @@ export function ApiConfigProviderList(props: ApiConfigProviderListProps) {
           <h2 className="text-xl font-bold text-[var(--glass-text-primary)]">{labels.providerPool}</h2>
           <p className="mt-1 text-[13px] text-[var(--glass-text-secondary)]">{labels.providerPoolHint}</p>
         </div>
+        <button
+          type="button"
+          onClick={() => setShowAddOpenRouterChannel((previous) => !previous)}
+          className="glass-btn-base glass-btn-soft ml-auto shrink-0 px-2.5 py-1.5 text-xs"
+        >
+          <AppIcon name="plus" className="h-3.5 w-3.5" />
+          {labels.addOpenRouterChannel}
+        </button>
       </div>
+      {showAddOpenRouterChannel && (
+        <form
+          onSubmit={handleAddOpenRouterChannel}
+          className="glass-surface-soft grid grid-cols-1 gap-3 rounded-2xl p-4 md:grid-cols-2"
+        >
+          <p className="text-xs text-[var(--glass-text-secondary)] md:col-span-2">
+            {labels.addOpenRouterChannelHint}
+          </p>
+          <label className="space-y-1 text-xs text-[var(--glass-text-secondary)]">
+            <span>{labels.channelName}</span>
+            <input
+              required
+              value={channelDraft.name}
+              onChange={(event) => setChannelDraft((previous) => ({ ...previous, name: event.target.value }))}
+              className="glass-input-base w-full px-3 py-2 text-xs"
+            />
+          </label>
+          <label className="space-y-1 text-xs text-[var(--glass-text-secondary)]">
+            <span>{labels.channelSlug}</span>
+            <input
+              required
+              value={channelDraft.slug}
+              onChange={(event) => setChannelDraft((previous) => ({ ...previous, slug: event.target.value }))}
+              placeholder="cn-proxy"
+              className="glass-input-base w-full px-3 py-2 font-mono text-xs"
+            />
+          </label>
+          <label className="space-y-1 text-xs text-[var(--glass-text-secondary)] md:col-span-2">
+            <span>{labels.baseUrl}</span>
+            <input
+              required
+              type="url"
+              value={channelDraft.baseUrl}
+              onChange={(event) => setChannelDraft((previous) => ({ ...previous, baseUrl: event.target.value }))}
+              className="glass-input-base w-full px-3 py-2 font-mono text-xs"
+            />
+          </label>
+          <label className="space-y-1 text-xs text-[var(--glass-text-secondary)] md:col-span-2">
+            <span>{labels.apiKeyLabel}</span>
+            <input
+              type="password"
+              autoComplete="off"
+              value={channelDraft.apiKey}
+              onChange={(event) => setChannelDraft((previous) => ({ ...previous, apiKey: event.target.value }))}
+              placeholder={labels.enterApiKey}
+              className="glass-input-base w-full px-3 py-2 text-xs"
+            />
+          </label>
+          <div className="flex justify-end gap-2 md:col-span-2">
+            <button
+              type="button"
+              onClick={() => setShowAddOpenRouterChannel(false)}
+              className="glass-btn-base glass-btn-soft px-3 py-2 text-xs"
+            >
+              {labels.cancel}
+            </button>
+            <button type="submit" className="glass-btn-base glass-btn-primary px-3 py-2 text-xs">
+              {labels.save}
+            </button>
+          </div>
+        </form>
+      )}
       <div className="glass-surface glass-card-shadow-soft overflow-hidden rounded-2xl">
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <SortableContext items={primaryProviders.map((provider) => provider.id)} strategy={verticalListSortingStrategy}>

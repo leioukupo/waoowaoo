@@ -140,6 +140,10 @@
   "modelSelectionRequired": "Select one model",
   "modelSelectionRequiredHint": "Multiple models were previously selected. Choose one; the system will not choose for you.",
   "moreProviders": "More providers",
+  "addOpenRouterChannel": "Add OpenRouter channel",
+  "addOpenRouterChannelHint": "Connect another OpenRouter-compatible endpoint with its own API key.",
+  "channelName": "Channel name",
+  "channelSlug": "Channel ID",
   "extensionModels": {
     "title": "Extensions",
     "hint": "Music and voice design are optional; unselected categories are not offered to AI.",

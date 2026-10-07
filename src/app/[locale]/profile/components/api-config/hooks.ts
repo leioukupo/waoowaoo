@@ -11,6 +11,7 @@ import {
     isPresetComingSoonModelKey,
     resolvePresetProviderName,
 } from './types'
+import type { OpenRouterChannelDraft } from './provider-card/types'
 import type { CapabilitySelections, UnifiedModelType } from '@/lib/ai-registry/types'
 import type { WorkflowConcurrencyConfig } from '@/lib/workflow-concurrency'
 import { useApiConfigSaver } from './editor'
@@ -23,6 +24,8 @@ import {
     createInitialProviders,
     mergeModelsForDisplay,
     mergeProvidersForDisplay,
+    composeOpenRouterChannelId,
+    normalizeOpenRouterChannelSlug,
     parseWorkflowConcurrency,
     replaceDefaultModelKey,
     type DefaultModels,
@@ -41,7 +44,9 @@ interface UseProvidersReturn {
     saveStatus: 'idle' | 'saving' | 'saved' | 'error'
     saveError: ApiConfigSaveError | null
     flushConfig: () => Promise<void>
+    addOpenRouterChannel: (draft: OpenRouterChannelDraft) => boolean
     updateProviderApiKey: (providerId: string, apiKey: string) => void
+    updateProviderBaseUrl: (providerId: string, baseUrl: string) => void
     reorderProviders: (activeProviderId: string, overProviderId: string) => void
     deleteProvider: (providerId: string) => void
     selectSlotModel: (type: UnifiedModelType, modelKey: string) => void
@@ -148,6 +153,55 @@ export function useProviders(): UseProvidersReturn {
     }, [performSave])
 
     // 提供商操作
+    const addOpenRouterChannel = useCallback((draft: OpenRouterChannelDraft): boolean => {
+        const catalogProvider = data?.catalog?.providers.find((provider) => provider.id === 'openrouter')
+        if (!catalogProvider) return false
+
+        const slug = normalizeOpenRouterChannelSlug(draft.slug)
+        const providerId = composeOpenRouterChannelId(slug)
+        if (!/^openrouter:[a-z0-9][a-z0-9_-]*$/.test(providerId)) {
+            showToast(t('providerIdExists'), 'warning')
+            return false
+        }
+        if (latestProvidersRef.current.some((provider) => provider.id.toLowerCase() === providerId)) {
+            showToast(t('providerIdExists'), 'warning')
+            return false
+        }
+
+        const name = draft.name.trim()
+        const baseUrl = draft.baseUrl.trim()
+        if (!name || !baseUrl) return false
+
+        const nextProvider: Provider = {
+            ...catalogProvider,
+            id: providerId,
+            name,
+            baseUrl,
+            featured: false,
+            apiKey: draft.apiKey.trim(),
+            hasApiKey: Boolean(draft.apiKey.trim()),
+        }
+        const next = [...latestProvidersRef.current, nextProvider]
+        latestProvidersRef.current = next
+        setProviders(next)
+        void performSave().then((saved) => {
+            if (saved) {
+                const settled = latestProvidersRef.current.map((provider) => (
+                    provider.id === providerId
+                        ? { ...provider, apiKey: undefined, hasApiKey: Boolean(nextProvider.apiKey) }
+                        : provider
+                ))
+                latestProvidersRef.current = settled
+                setProviders(settled)
+                return
+            }
+            const reverted = latestProvidersRef.current.filter((provider) => provider.id !== providerId)
+            latestProvidersRef.current = reverted
+            setProviders(reverted)
+        })
+        return true
+    }, [data?.catalog?.providers, performSave, showToast, t])
+
     const updateProviderApiKey = useCallback((providerId: string, apiKey: string) => {
         const previousProvider = latestProvidersRef.current.find((provider) => provider.id === providerId)
         if (!previousProvider) return
@@ -164,6 +218,26 @@ export function useProviders(): UseProvidersReturn {
             })
             latestProvidersRef.current = settled
             setProviders(settled)
+        })
+    }, [performSave])
+
+    const updateProviderBaseUrl = useCallback((providerId: string, baseUrl: string) => {
+        const previousProvider = latestProvidersRef.current.find((provider) => provider.id === providerId)
+        if (!previousProvider) return
+        const nextBaseUrl = baseUrl.trim()
+        if (!nextBaseUrl) return
+        const next = latestProvidersRef.current.map((provider) => (
+            provider.id === providerId ? { ...provider, baseUrl: nextBaseUrl } : provider
+        ))
+        latestProvidersRef.current = next
+        setProviders(next)
+        void performSave().then((saved) => {
+            if (saved) return
+            const reverted = latestProvidersRef.current.map((provider) => (
+                provider.id === providerId ? previousProvider : provider
+            ))
+            latestProvidersRef.current = reverted
+            setProviders(reverted)
         })
     }, [performSave])
 
@@ -339,7 +413,9 @@ export function useProviders(): UseProvidersReturn {
         saveStatus,
         saveError,
         flushConfig,
+        addOpenRouterChannel,
         updateProviderApiKey,
+        updateProviderBaseUrl,
         reorderProviders,
         deleteProvider,
         selectSlotModel,

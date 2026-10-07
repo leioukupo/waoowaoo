@@ -25,6 +25,7 @@ export type DockerCodexRuntimeConfig = RuntimeConfigBase & {
   readonly cpuLimit: number
   readonly memoryBytes: number
   readonly pidsLimit: number
+  readonly localImageAttested: boolean
 }
 
 export type CodexRuntimeConfig = LocalCodexRuntimeConfig | DockerCodexRuntimeConfig
@@ -64,12 +65,15 @@ export function readCodexRuntimeConfig(
   }
   if (driver === 'local') return { ...base, driver }
 
+  const localImageAttested = environment.CODEX_RUNTIME_IMAGE_ATTESTED === '1'
+
   return {
     ...base,
     driver,
     image: requireImageReference(
       environment.CODEX_RUNTIME_IMAGE,
-      environment.NODE_ENV === 'production',
+      environment.NODE_ENV === 'production' && !localImageAttested,
+      localImageAttested,
     ),
     networkName: requireNetworkName(environment.CODEX_RUNTIME_NETWORK),
     cpuLimit: requirePositiveNumber(environment.CODEX_RUNTIME_CPU_LIMIT, 'CODEX_RUNTIME_CPU_LIMIT_INVALID'),
@@ -79,6 +83,7 @@ export function readCodexRuntimeConfig(
       256 * 1024 * 1024,
     ),
     pidsLimit: requireInteger(environment.CODEX_RUNTIME_PIDS_LIMIT, 'CODEX_RUNTIME_PIDS_LIMIT_INVALID', 32),
+    localImageAttested,
   }
 }
 
@@ -101,7 +106,7 @@ export function createRuntimeContainerAdapter(
     cpuLimit: config.cpuLimit,
     memoryBytes: config.memoryBytes,
     pidsLimit: config.pidsLimit,
-    immutableImageRequired: (params.processEnvironment ?? process.env).NODE_ENV === 'production',
+    immutableImageRequired: (params.processEnvironment ?? process.env).NODE_ENV === 'production' && !config.localImageAttested,
     processEnvironment: params.processEnvironment ?? process.env,
     shutdownTimeoutMs: params.shutdownTimeoutMs,
   })
@@ -139,9 +144,15 @@ function requirePositiveNumber(value: string | undefined, code: string): number 
   return parsed
 }
 
-function requireImageReference(value: string | undefined, immutable: boolean): string {
+function requireImageReference(value: string | undefined, immutable: boolean, localImageAttested = false): string {
   if (!value || value !== value.trim() || /\s/u.test(value)) {
     throw new Error('CODEX_RUNTIME_IMAGE_DIGEST_REQUIRED')
+  }
+  if (localImageAttested) {
+    if (!/^sha256:[a-f0-9]{64}$/u.test(value) || value === `sha256:${'0'.repeat(64)}`) {
+      throw new Error('CODEX_RUNTIME_IMAGE_ATTESTATION_INVALID')
+    }
+    return value
   }
   if (!immutable) return value
   if (!/^.+@sha256:[a-f0-9]{64}$/u.test(value) || value.endsWith(`@sha256:${'0'.repeat(64)}`)) {

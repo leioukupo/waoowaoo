@@ -84,7 +84,7 @@ export function normalizeProvidersInput(rawProviders: unknown): StoredProvider[]
       : undefined
 
     normalized.push({
-      id,
+      id: normalizedId,
       name,
       baseUrl,
       apiKey: typeof item.apiKey === 'string' ? item.apiKey.trim() : undefined,
@@ -131,12 +131,13 @@ export function parseStoredProviders(rawProviders: string | null | undefined): S
       })
     }
 
-    assertSupportedProvider(id, `customProviders[${index}].id`)
+    const normalizedId = id.toLowerCase()
+    assertSupportedProvider(normalizedId, `customProviders[${index}].id`)
 
     const baseUrl = readTrimmedString(raw.baseUrl) || undefined
 
     normalized.push({
-      id,
+      id: normalizedId,
       name,
       baseUrl,
       apiKey: typeof raw.apiKey === 'string' ? raw.apiKey.trim() : undefined,

@@ -6,6 +6,13 @@ export interface ProviderCardDefaultModels {
   assistantModel?: string
 }
 
+export interface OpenRouterChannelDraft {
+  slug: string
+  name: string
+  baseUrl: string
+  apiKey: string
+}
+
 export interface ProviderCardProps {
   provider: Provider
   dragHandle?: ReactNode
@@ -15,6 +22,7 @@ export interface ProviderCardProps {
   expanded: boolean
   onExpandChange: (expanded: boolean) => void
   onUpdateApiKey: (providerId: string, apiKey: string) => void
+  onUpdateBaseUrl: (providerId: string, baseUrl: string) => void
   onDeleteModel: (modelKey: string) => void
   onUpdateModel?: (modelKey: string, updates: Partial<CustomModel>) => void
   onDeleteProvider?: (providerId: string) => void

@@ -1,4 +1,4 @@
-export const PROFILE_SECTIONS = ['overview', 'security', 'apiConfig', 'billing'] as const
+export const PROFILE_SECTIONS = ['overview', 'security', 'apiConfig', 'infrastructure', 'billing'] as const
 
 export type ProfileSection = typeof PROFILE_SECTIONS[number]
 

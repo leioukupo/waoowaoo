@@ -1,31 +1,36 @@
-import type { AsyncTaskProviderRegistration, ParsedAsyncExternalId } from '@/lib/ai-providers/async-task-types'
+import type { AsyncTaskProviderRegistration } from '@/lib/ai-providers/async-task-types'
 import { normalizeAsyncPollResult } from '@/lib/ai-providers/async-task-types'
+import { cancelOpenRouterVideoRequest } from './video-transport'
 import { queryOpenRouterVideoStatus } from './video'
-
-function parseOpenRouterExternalId(externalId: string): ParsedAsyncExternalId {
-  const parts = externalId.split(':')
-  const type = parts[1]
-  const requestId = parts.slice(2).join(':')
-  if (type !== 'VIDEO' || !requestId) {
-    throw new Error(`无效 OPENROUTER externalId: "${externalId}"，应为 OPENROUTER:VIDEO:requestId`)
-  }
-  return {
-    provider: 'OPENROUTER',
-    type: 'VIDEO',
-    requestId,
-  }
-}
+import {
+  formatOpenRouterExternalId,
+  parseOpenRouterExternalId,
+} from './external-id'
+import { getProviderKey } from '@/lib/ai-registry/selection'
 
 export const openRouterAsyncTaskProvider: AsyncTaskProviderRegistration = {
   providerCode: 'OPENROUTER',
   providerKey: 'openrouter',
   canParseExternalId: (externalId) => externalId.startsWith('OPENROUTER:'),
   parseExternalId: parseOpenRouterExternalId,
-  formatExternalId: (input) => `OPENROUTER:${input.type}:${input.requestId}`,
+  formatExternalId: (input) => {
+    if (input.type !== 'VIDEO') {
+      throw new Error(`OPENROUTER externalId type unsupported: ${input.type}`)
+    }
+    return formatOpenRouterExternalId({
+      type: input.type,
+      requestId: input.requestId,
+      providerToken: input.providerToken,
+    })
+  },
   poll: async ({ parsed, context }) => {
-    const { apiKey, baseUrl } = await context.getProviderConfig(context.userId, 'openrouter')
+    const providerId = parsed.providerToken?.trim() || 'openrouter'
+    if (getProviderKey(providerId).toLowerCase() !== 'openrouter') {
+      throw new Error(`OPENROUTER_PROVIDER_TOKEN_INVALID:${providerId}`)
+    }
+    const { apiKey, baseUrl } = await context.getProviderConfig(context.userId, providerId)
     if (!baseUrl) {
-      throw new Error('PROVIDER_BASE_URL_MISSING: openrouter (video)')
+      throw new Error(`PROVIDER_BASE_URL_MISSING: ${providerId} (video)`)
     }
     const result = await queryOpenRouterVideoStatus({
       baseUrl,
@@ -39,5 +44,14 @@ export const openRouterAsyncTaskProvider: AsyncTaskProviderRegistration = {
       resultUrl: result.resultUrl,
       downloadHeaders: result.downloadHeaders,
     })
+  },
+  cancel: async ({ parsed, context }) => {
+    const providerId = parsed.providerToken?.trim() || 'openrouter'
+    if (getProviderKey(providerId).toLowerCase() !== 'openrouter') {
+      throw new Error(`OPENROUTER_PROVIDER_TOKEN_INVALID:${providerId}`)
+    }
+    const { apiKey, baseUrl } = await context.getProviderConfig(context.userId, providerId)
+    if (!baseUrl) throw new Error(`PROVIDER_BASE_URL_MISSING: ${providerId} (video)`)
+    await cancelOpenRouterVideoRequest({ baseUrl, apiKey, requestId: parsed.requestId })
   },
 }

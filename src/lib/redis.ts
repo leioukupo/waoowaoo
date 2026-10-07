@@ -10,8 +10,8 @@ const globalForRedis = globalThis as typeof globalThis & {
   __waoowaooRedis?: RedisSingleton
 }
 
-const redisConfig = resolveRedisRuntimeConfig()
 function buildBaseConfig() {
+  const redisConfig = resolveRedisRuntimeConfig()
   return {
     host: redisConfig.host,
     port: redisConfig.port,
@@ -28,6 +28,7 @@ function buildBaseConfig() {
 }
 
 function onConnectLog(scope: string, client: Redis) {
+  const redisConfig = resolveRedisRuntimeConfig()
   client.on('connect', () => _ulogDebug(`[Redis:${scope}] connected ${redisConfig.host}:${redisConfig.port}`))
   client.on('error', (err) => _ulogError(`[Redis:${scope}] error:`, err.message))
 }
@@ -73,6 +74,21 @@ function createLazyRedisProxy(getClient: () => Redis) {
 }
 
 export const redis = createLazyRedisProxy(getAppRedis)
+
+/**
+ * Drop the cached application client after an administrator changes Redis
+ * settings. The next request creates a client from the new environment.
+ */
+export async function resetRedisRuntime(): Promise<void> {
+  const client = singleton.app
+  singleton.app = undefined
+  if (!client) return
+  try {
+    await client.quit()
+  } catch {
+    client.disconnect()
+  }
+}
 
 export function createSubscriber() {
   const client = new Redis({

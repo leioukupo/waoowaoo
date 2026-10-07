@@ -87,7 +87,8 @@ function supportsTransport(input: {
   mediaKind: ProviderMediaInputKind
   transport: ProviderMediaInputTransport
 }): boolean {
-  const contract = CONTRACT_BY_PROVIDER_MODALITY.get(`${input.provider}:${input.modality}`)
+  const providerKey = input.provider.split(':', 1)[0]
+  const contract = CONTRACT_BY_PROVIDER_MODALITY.get(`${providerKey}:${input.modality}`)
   return contract?.transports[input.mediaKind]?.includes(input.transport) === true
 }
 

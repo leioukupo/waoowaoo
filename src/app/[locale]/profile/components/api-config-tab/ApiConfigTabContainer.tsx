@@ -25,7 +25,9 @@ export function ApiConfigTabContainer() {
     loading,
     saveStatus,
     saveError,
+    addOpenRouterChannel,
     updateProviderApiKey,
+    updateProviderBaseUrl,
     reorderProviders,
     deleteProvider,
     selectSlotModel,
@@ -121,7 +123,9 @@ export function ApiConfigTabContainer() {
             allModels={models}
             defaultModels={defaultModels}
             getModelsForProvider={getModelsForProvider}
+            onAddOpenRouterChannel={addOpenRouterChannel}
             onUpdateApiKey={updateProviderApiKey}
+            onUpdateBaseUrl={updateProviderBaseUrl}
             onReorderProviders={reorderProviders}
             onDeleteModel={deleteModel}
             onUpdateModel={updateModel}
@@ -132,6 +136,15 @@ export function ApiConfigTabContainer() {
               providerPoolHint: t('providerPoolHint'),
               dragToSort: t('dragToSort'),
               moreProviders: t('moreProviders'),
+              addOpenRouterChannel: t('addOpenRouterChannel'),
+              addOpenRouterChannelHint: t('addOpenRouterChannelHint'),
+              channelName: t('channelName'),
+              channelSlug: t('channelSlug'),
+              apiKeyLabel: t('apiKeyLabel'),
+              enterApiKey: t('enterApiKey'),
+              baseUrl: t('baseUrl'),
+              save: t('save'),
+              cancel: t('cancel'),
             }}
           />
         </div>

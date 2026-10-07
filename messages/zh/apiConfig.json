@@ -140,6 +140,10 @@
   "modelSelectionRequired": "请选择一个模型",
   "modelSelectionRequiredHint": "原配置包含多个模型，请重新选择一个；系统不会自动选择。",
   "moreProviders": "更多服务商",
+  "addOpenRouterChannel": "添加 OpenRouter 渠道",
+  "addOpenRouterChannelHint": "连接另一个兼容 OpenRouter 的地址，并为该渠道单独设置 API Key。",
+  "channelName": "渠道名称",
+  "channelSlug": "渠道 ID",
   "extensionModels": {
     "title": "扩展功能",
     "hint": "音乐与音色按需启用，未选择的类别不会提供给 AI。",

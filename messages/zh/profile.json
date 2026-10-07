@@ -15,6 +15,7 @@
   "frozen": "冻结",
   "totalSpent": "已消费",
   "apiConfig": "API 配置",
+  "infrastructure": "基础设施",
   "rechargeRecords": "额度入账记录",
   "billingRecords": "额度扣减记录",
   "logout": "退出登录",

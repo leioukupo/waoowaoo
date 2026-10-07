@@ -44,7 +44,11 @@ export function useApiConfigFilters({ providers, models, defaultModels }: UseApi
 
   const modelProviders = useMemo(() => {
     const modelProviderIds = new Set(models.map((model) => model.provider))
-    return providers.filter((provider) => modelProviderIds.has(provider.id))
+    // A newly added OpenRouter channel has no models until the user adds the
+    // first one. Keep its card visible so the model form remains reachable.
+    return providers.filter((provider) => (
+      modelProviderIds.has(provider.id) || provider.id.startsWith('openrouter:')
+    ))
   }, [models, providers])
 
   /** Every model of a type, providers holding a key first so the pickable ones lead. */

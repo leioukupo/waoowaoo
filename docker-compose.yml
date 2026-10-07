@@ -6,11 +6,11 @@ x-logging: &default-logging
 
 x-app-environment: &app-environment
   # Application database. Temporal owns separate schemas and never uses this URL.
-  DATABASE_URL: "${COMPOSE_DATABASE_URL:?Set COMPOSE_DATABASE_URL in .env; use the mysql service hostname}"
+  DATABASE_URL: "${COMPOSE_DATABASE_URL:-}"
   REDIS_HOST: redis
   REDIS_PORT: "6379"
   REDIS_USERNAME: ""
-  REDIS_PASSWORD: "${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}"
+  REDIS_PASSWORD: "${REDIS_PASSWORD:-}"
   REDIS_TLS: ""
   # Edition overlays own the concrete storage endpoint. Empty values here keep
   # this shared base composable; runtime storage initialization still fails
@@ -25,9 +25,9 @@ x-app-environment: &app-environment
   S3_FORCE_PATH_STYLE: "${S3_FORCE_PATH_STYLE:-false}"
   NEXTAUTH_URL: "${NEXTAUTH_URL:-http://localhost:13000}"
   INTERNAL_APP_URL: "http://app:3000"
-  NEXTAUTH_SECRET: "${NEXTAUTH_SECRET:?Set NEXTAUTH_SECRET in .env}"
-  CRON_SECRET: "${CRON_SECRET:?Set CRON_SECRET in .env}"
-  API_ENCRYPTION_KEY: "${API_ENCRYPTION_KEY:?Set API_ENCRYPTION_KEY in .env}"
+  NEXTAUTH_SECRET: "${NEXTAUTH_SECRET:-}"
+  CRON_SECRET: "${CRON_SECRET:-}"
+  API_ENCRYPTION_KEY: "${API_ENCRYPTION_KEY:-}"
   TRUSTED_PROXY_HOPS: "${TRUSTED_PROXY_HOPS:-0}"
   LOG_UNIFIED_ENABLED: "true"
   LOG_LEVEL: "${LOG_LEVEL:-INFO}"
@@ -112,10 +112,10 @@ services:
     restart: unless-stopped
     logging: *default-logging
     environment:
-      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}"
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:-}"
       MYSQL_DATABASE: "${MYSQL_DATABASE:-waoowaoo}"
       MYSQL_USER: "${MYSQL_USER:-waoowaoo}"
-      MYSQL_PASSWORD: "${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env}"
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD:-}"
     ports:
       - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${MYSQL_HOST_PORT:-13306}:3306"
     volumes:
@@ -135,7 +135,7 @@ services:
     restart: unless-stopped
     logging: *default-logging
     environment:
-      REDIS_PASSWORD: "${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:-}"
     ports:
       - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${REDIS_HOST_PORT:-16379}:6379"
     volumes:
@@ -172,9 +172,9 @@ services:
     environment:
       MYSQL_HOST: 127.0.0.1
       MYSQL_PORT: "3306"
-      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}"
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:-}"
       TEMPORAL_MYSQL_USER: "${TEMPORAL_MYSQL_USER:-temporal}"
-      TEMPORAL_MYSQL_PASSWORD: "${TEMPORAL_MYSQL_PASSWORD:?Set TEMPORAL_MYSQL_PASSWORD in .env}"
+      TEMPORAL_MYSQL_PASSWORD: "${TEMPORAL_MYSQL_PASSWORD:-}"
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
@@ -231,7 +231,7 @@ services:
     environment:
       MYSQL_SEEDS: mysql
       MYSQL_USER: "${TEMPORAL_MYSQL_USER:-temporal}"
-      SQL_PASSWORD: "${TEMPORAL_MYSQL_PASSWORD:?Set TEMPORAL_MYSQL_PASSWORD in .env}"
+      SQL_PASSWORD: "${TEMPORAL_MYSQL_PASSWORD:-}"
       DB_PORT: "3306"
     entrypoint: ["/bin/sh", "-ec"]
     command:
@@ -289,7 +289,7 @@ services:
       DB_PORT: "3306"
       MYSQL_SEEDS: mysql
       MYSQL_USER: "${TEMPORAL_MYSQL_USER:-temporal}"
-      MYSQL_PWD: "${TEMPORAL_MYSQL_PASSWORD:?Set TEMPORAL_MYSQL_PASSWORD in .env}"
+      MYSQL_PWD: "${TEMPORAL_MYSQL_PASSWORD:-}"
       BIND_ON_IP: 0.0.0.0
     ports:
       - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${TEMPORAL_HOST_PORT:-17233}:7233"

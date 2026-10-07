@@ -8,6 +8,25 @@ export interface DefaultModels {
   assistantModel?: string
 }
 
+/**
+ * Provider instance IDs are persisted as `openrouter:<slug>`. Keep the slug
+ * deliberately small and URL-safe so it remains stable in model keys and
+ * sortable provider IDs.
+ */
+export function normalizeOpenRouterChannelSlug(value: string): string {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^[-_]+|[-_]+$/g, '')
+  return normalized || 'channel'
+}
+
+export function composeOpenRouterChannelId(slug: string): string {
+  return `openrouter:${normalizeOpenRouterChannelSlug(slug)}`
+}
+
 export const DEFAULT_MODEL_FIELDS = ['assistantModel'] as const satisfies ReadonlyArray<keyof DefaultModels>
 
 export function createInitialProviders(presetProviders: Provider[]): Provider[] {
@@ -44,12 +63,21 @@ export function mergeProvidersForDisplay(
     const providerKey = getProviderKey(savedProvider.id)
     const matchedPreset = presetProviders.find((presetProvider) => presetProvider.id === providerKey)
     if (matchedPreset) {
+      const isPresetIdentity = savedProvider.id === providerKey
       merged.push({
         ...matchedPreset,
+        id: savedProvider.id,
+        name: isPresetIdentity ? matchedPreset.name : (savedProvider.name || matchedPreset.name),
+        // API keys are never returned by the server. Keep the edit draft
+        // empty while preserving the masked credential state.
+        apiKey: undefined,
         hasApiKey: savedProvider.hasApiKey === true,
         baseUrl: savedProvider.baseUrl || matchedPreset.baseUrl,
+        // A custom OpenRouter channel inherits the catalog capabilities from
+        // the built-in adapter, but keeps its own identity and display name.
+        ...(isPresetIdentity ? {} : { featured: false }),
       })
-      seenPresetKeys.add(providerKey)
+      if (isPresetIdentity) seenPresetKeys.add(providerKey)
       continue
     }
 

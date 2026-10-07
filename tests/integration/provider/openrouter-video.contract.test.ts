@@ -9,11 +9,11 @@ import { startScenarioServer } from '../../helpers/fakes/scenario-server'
 describe('provider contract - OpenRouter video', () => {
   let server: Awaited<ReturnType<typeof startScenarioServer>> | null = null
 
-  const providerConfig = () => {
+  const providerConfig = (id = 'openrouter') => {
     if (!server) throw new Error('TEST_SCENARIO_SERVER_REQUIRED')
     return {
-      id: 'openrouter',
-      name: 'openrouter',
+      id,
+      name: id,
       apiKey: 'openrouter-video-key',
       baseUrl: `${server.baseUrl}/openrouter`,
     }
@@ -278,6 +278,42 @@ describe('provider contract - OpenRouter video', () => {
         { type: 'audio_url', audio_url: { url: referenceAudioDataUrl } },
         { type: 'video_url', video_url: { url: 'https://example.com/motion.mp4' } },
       ],
+    })
+  })
+
+  it('persists a custom OpenRouter channel in the async external id', async () => {
+    server!.defineScenario({
+      method: 'POST',
+      path: '/openrouter/videos',
+      mode: 'success',
+      submitResponse: {
+        status: 202,
+        body: {
+          id: 'custom-channel-job',
+          status: 'pending',
+          polling_url: '/openrouter/videos/custom-channel-job',
+        },
+      },
+    })
+
+    await expect(executeOpenRouterVideoGeneration({
+      userId: 'user-1',
+      providerConfig: providerConfig('openrouter:third-party'),
+      selection: {
+        provider: 'openrouter:third-party',
+        modelId: 'bytedance/seedance-2.0-fast',
+        modelKey: 'openrouter:third-party::bytedance/seedance-2.0-fast',
+        variantSubKind: 'official',
+      },
+      imageUrl: '',
+      options: {
+        prompt: 'keep the custom channel identity on the durable task',
+        duration: 6,
+        resolution: '720p',
+        aspectRatio: '16:9',
+      },
+    })).resolves.toMatchObject({
+      externalId: 'OPENROUTER:VIDEO:custom-channel-job:provider=openrouter%3Athird-party',
     })
   })
 })

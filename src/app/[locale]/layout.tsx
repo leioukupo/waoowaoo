@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { NextIntlClientProvider } from 'next-intl';
 import { getMessages, getTranslations, setRequestLocale } from 'next-intl/server';
-import { notFound } from 'next/navigation';
-import "../globals.css";
+import { notFound, redirect } from 'next/navigation';
+import { isRuntimeConfigured } from '@/lib/runtime-config/store';
 import { Providers } from "./providers";
 
 import { locales } from '@/i18n/routing';
@@ -43,6 +43,10 @@ export default async function LocaleLayout({
 }) {
     const { locale } = await params;
 
+    if (process.env.NEXT_PHASE !== 'phase-production-build' && !isRuntimeConfigured()) {
+        redirect('/setup');
+    }
+
     // 验证 locale 是否有效
     if (!locales.includes(locale as SupportedLocale)) {
         notFound();
@@ -54,17 +58,10 @@ export default async function LocaleLayout({
     const messages = await getMessages();
 
     return (
-        <html lang={locale} suppressHydrationWarning>
-            <body
-                suppressHydrationWarning
-            >
-                <NextIntlClientProvider messages={messages}>
-                    <Providers>
-                        {children}
-                    </Providers>
-                </NextIntlClientProvider>
-
-            </body>
-        </html>
+        <NextIntlClientProvider messages={messages}>
+            <Providers>
+                {children}
+            </Providers>
+        </NextIntlClientProvider>
     );
 }

@@ -23,6 +23,7 @@ import {
   OPENROUTER_CONTENT_POLICY_REJECTION_MESSAGE,
   throwNormalizedOpenRouterSdkError,
 } from './error-normalization'
+import { formatOpenRouterExternalId } from './external-id'
 
 type OpenRouterVideoOptions = NonNullable<AiProviderVideoExecutionContext['options']>
 
@@ -426,7 +427,11 @@ export async function executeOpenRouterVideoGeneration(input: AiProviderVideoExe
     async: true,
     requestId,
     endpoint: 'videos',
-    externalId: `OPENROUTER:VIDEO:${requestId}`,
+    externalId: formatOpenRouterExternalId({
+      type: 'VIDEO',
+      requestId,
+      providerToken: input.providerConfig.id,
+    }),
   }
 }
 

@@ -11,8 +11,9 @@ FROM node:22-bookworm-slim AS base
 RUN rm -f /etc/apt/apt.conf.d/docker-clean
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get -o Acquire::Retries=5 update \
-    && apt-get -o Acquire::Retries=5 install -y --no-install-recommends ca-certificates openssl
+    sh -ec 'apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10 update \
+      && apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10 install -y --no-install-recommends ca-certificates openssl \
+      || echo "Optional OpenSSL packages unavailable; using the node base image" >&2'
 
 # ==================== Stage 1: Dependencies ====================
 FROM base AS deps
@@ -40,14 +41,15 @@ ENV NODE_ENV=development
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get -o Acquire::Retries=5 update \
-    && apt-get -o Acquire::Retries=5 install -y --no-install-recommends gosu tini
+    sh -ec 'apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10 update \
+      && apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10 install -y --no-install-recommends gosu tini \
+      || echo "Optional gosu/tini packages unavailable; entrypoint fallbacks will be used" >&2'
 
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --chown=root:root docker/development/entrypoint.sh /usr/local/bin/waoowaoo-dev-entrypoint
 RUN chmod 0755 /usr/local/bin/waoowaoo-dev-entrypoint
 
-ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/waoowaoo-dev-entrypoint"]
+ENTRYPOINT ["/usr/local/bin/waoowaoo-dev-entrypoint"]
 
 # ==================== Stage 2: Build ====================
 FROM deps AS builder
@@ -65,8 +67,9 @@ LABEL com.waoowaoo.deployment-edition=$DEPLOYMENT_EDITION
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get -o Acquire::Retries=5 update \
-    && apt-get -o Acquire::Retries=5 install -y --no-install-recommends gosu tini
+    sh -ec 'apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10 update \
+      && apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10 install -y --no-install-recommends gosu tini \
+      || echo "Optional gosu/tini packages unavailable; entrypoint fallbacks will be used" >&2'
 
 # Web and Temporal Worker run from this exact build snapshot. Self-hosted
 # builder output has ee/ removed before this copy; Cloud output retains the EE
@@ -87,5 +90,5 @@ RUN chmod 0755 /usr/local/bin/waoowaoo-entrypoint
 
 EXPOSE 3000
 
-ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/waoowaoo-entrypoint"]
+ENTRYPOINT ["/usr/local/bin/waoowaoo-entrypoint"]
 CMD ["npm", "run", "start:next"]

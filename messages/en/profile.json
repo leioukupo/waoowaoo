@@ -15,6 +15,7 @@
   "frozen": "Frozen",
   "totalSpent": "Total Spent",
   "apiConfig": "API Configuration",
+  "infrastructure": "Infrastructure",
   "rechargeRecords": "Credit Grant Records",
   "billingRecords": "Credit Usage Records",
   "logout": "Logout",

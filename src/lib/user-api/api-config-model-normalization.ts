@@ -54,7 +54,7 @@ function normalizeStoredModel(raw: unknown, index: number): StoredModel {
   const modelKeyFromField = readTrimmedString(raw.modelKey)
   const parsedModelKey = parseModelKeyStrict(modelKeyFromField)
 
-  const provider = providerFromField || parsedModelKey?.provider || ''
+  const provider = (providerFromField || parsedModelKey?.provider || '').toLowerCase()
   const modelId = modelIdFromField || parsedModelKey?.modelId || ''
   const modelKey = composeModelKey(provider, modelId)
 
@@ -64,7 +64,7 @@ function normalizeStoredModel(raw: unknown, index: number): StoredModel {
       field: `models[${index}].modelKey`,
     })
   }
-  if (modelKeyFromField && (!parsedModelKey || parsedModelKey.modelKey !== modelKey)) {
+  if (modelKeyFromField && (!parsedModelKey || composeModelKey(parsedModelKey.provider.toLowerCase(), parsedModelKey.modelId) !== modelKey)) {
     throw new ApiError('INVALID_PARAMS', {
       code: 'MODEL_KEY_MISMATCH',
       field: `models[${index}].modelKey`,
