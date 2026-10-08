@@ -145,6 +145,17 @@ export function ApiConfigTabContainer() {
               baseUrl: t('baseUrl'),
               save: t('save'),
               cancel: t('cancel'),
+              fetchModels: t('fetchModels'),
+              fetchingModels: t('fetchingModels'),
+              fetchModelsFailed: t('fetchModelsFailed'),
+              fetchModelsUnreachable: t('fetchModelsUnreachable'),
+              fetchModelsAuthFailed: t('fetchModelsAuthFailed'),
+              fetchModelsNoModelsEndpoint: t('fetchModelsNoModelsEndpoint'),
+              modelSearch: t('modelSearch'),
+              modelType: t('modelType'),
+              noFetchedModels: t('noFetchedModels'),
+              noModelMatch: t('noModelMatch'),
+              fetchedModelsHint: t('fetchedModelsHint'),
             }}
           />
         </div>

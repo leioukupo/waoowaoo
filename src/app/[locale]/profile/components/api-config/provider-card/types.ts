@@ -6,11 +6,18 @@ export interface ProviderCardDefaultModels {
   assistantModel?: string
 }
 
+export interface ChannelModelDraft {
+  modelId: string
+  name: string
+  type: UnifiedModelType
+}
+
 export interface OpenRouterChannelDraft {
   slug: string
   name: string
   baseUrl: string
   apiKey: string
+  models?: ChannelModelDraft[]
 }
 
 export interface ProviderCardProps {

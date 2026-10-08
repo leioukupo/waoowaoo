@@ -19,8 +19,13 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { AppIcon } from '@/components/ui/icons'
+import { useTranslations } from 'next-intl'
+import { apiFetch } from '@/lib/api-fetch'
+import { MODEL_SLOT_TYPES } from '@/lib/ai-registry/media-model-selection'
+import type { UnifiedModelType } from '@/lib/ai-registry/types'
+import { MODEL_SLOT_PRESENTATION } from './model-slot-presentation'
 import type { CustomModel, Provider } from '../api-config'
-import type { OpenRouterChannelDraft } from '../api-config/provider-card/types'
+import type { ChannelModelDraft, OpenRouterChannelDraft } from '../api-config/provider-card/types'
 import { ProviderCard } from '../api-config'
 
 interface DefaultModels {
@@ -54,7 +59,26 @@ interface ApiConfigProviderListProps {
     baseUrl: string
     save: string
     cancel: string
+    fetchModels: string
+    fetchingModels: string
+    fetchModelsFailed: string
+    fetchModelsUnreachable: string
+    fetchModelsAuthFailed: string
+    fetchModelsNoModelsEndpoint: string
+    modelSearch: string
+    modelType: string
+    noFetchedModels: string
+    noModelMatch: string
+    fetchedModelsHint: string
   }
+}
+
+interface FetchedModelRow extends ChannelModelDraft {
+  checked: boolean
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
 }
 
 /** Credentials and the custom model catalog; model choice happens in the slots above. */
@@ -70,6 +94,12 @@ export function ApiConfigProviderList(props: ApiConfigProviderListProps) {
     baseUrl: openRouterProvider?.baseUrl ?? '',
     apiKey: '',
   })
+  const [fetchedModels, setFetchedModels] = useState<FetchedModelRow[]>([])
+  const [fetchSucceeded, setFetchSucceeded] = useState(false)
+  const [modelSearch, setModelSearch] = useState('')
+  const [fetchingModels, setFetchingModels] = useState(false)
+  const [fetchModelsError, setFetchModelsError] = useState<string | null>(null)
+  const t = useTranslations('apiConfig')
 
   useEffect(() => {
     if (!channelDraft.baseUrl && openRouterProvider?.baseUrl) {
@@ -79,15 +109,110 @@ export function ApiConfigProviderList(props: ApiConfigProviderListProps) {
     }
   }, [channelDraft.baseUrl, openRouterProvider?.baseUrl])
 
+  const modelTypeOptions: UnifiedModelType[] = openRouterProvider?.modelTypes ?? [...MODEL_SLOT_TYPES]
+  const modelTypeLabels = useMemo(() => {
+    const labelMap: Partial<Record<UnifiedModelType, string>> = {}
+    for (const type of MODEL_SLOT_TYPES) {
+      labelMap[type] = t(MODEL_SLOT_PRESENTATION[type].typeLabel)
+    }
+    return labelMap
+  }, [t])
+
+  const clearFetchedModels = useCallback(() => {
+    setFetchedModels([])
+    setFetchSucceeded(false)
+    setModelSearch('')
+    setFetchModelsError(null)
+  }, [])
+
+  const handleFetchModels = useCallback(async () => {
+    const baseUrl = channelDraft.baseUrl.trim()
+    const apiKey = channelDraft.apiKey.trim()
+    if (!baseUrl || !apiKey) return
+    setFetchingModels(true)
+    setFetchModelsError(null)
+    setFetchSucceeded(false)
+    try {
+      const response = await apiFetch('/api/user/api-config/preview-models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ baseUrl, apiKey }),
+      })
+      let payload: unknown
+      try {
+        payload = await response.json()
+      } catch {
+        payload = null
+      }
+      if (!response.ok) {
+        const error = isRecord(payload) && isRecord(payload.error) ? payload.error : null
+        const details = error && isRecord(error.details) ? error.details : null
+        const detailCode = typeof details?.code === 'string' ? details.code : ''
+        if (detailCode === 'PREVIEW_MODELS_AUTH_FAILED') {
+          setFetchModelsError(labels.fetchModelsAuthFailed)
+        } else if (detailCode === 'PREVIEW_MODELS_TIMEOUT' || detailCode === 'PREVIEW_MODELS_UNREACHABLE') {
+          setFetchModelsError(labels.fetchModelsUnreachable)
+        } else if (detailCode === 'PREVIEW_MODELS_ENDPOINT_NOT_FOUND') {
+          setFetchModelsError(labels.fetchModelsNoModelsEndpoint)
+        } else {
+          setFetchModelsError(labels.fetchModelsFailed)
+        }
+        return
+      }
+      const rawModels = isRecord(payload) ? payload.models : null
+      const rows: FetchedModelRow[] = []
+      if (Array.isArray(rawModels)) {
+        for (const entry of rawModels) {
+          if (!isRecord(entry)) continue
+          const modelId = typeof entry.modelId === 'string' ? entry.modelId.trim() : ''
+          if (!modelId) continue
+          const name = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : modelId
+          const suggested = typeof entry.suggestedType === 'string' ? entry.suggestedType : ''
+          const type: UnifiedModelType = modelTypeOptions.includes(suggested as UnifiedModelType)
+            ? (suggested as UnifiedModelType)
+            : (modelTypeOptions.includes('llm') ? 'llm' : modelTypeOptions[0])
+          rows.push({ modelId, name, type, checked: true })
+        }
+      }
+      setFetchedModels(rows)
+      setFetchSucceeded(true)
+      setModelSearch('')
+    } catch {
+      setFetchModelsError(labels.fetchModelsFailed)
+    } finally {
+      setFetchingModels(false)
+    }
+  }, [channelDraft.baseUrl, channelDraft.apiKey, labels, modelTypeOptions])
+
+  const updateFetchedModel = (modelId: string, patch: Partial<Pick<FetchedModelRow, 'name' | 'type' | 'checked'>>) => {
+    setFetchedModels((previous) => previous.map((row) => (row.modelId === modelId ? { ...row, ...patch } : row)))
+  }
+
+  const filteredFetchedModels = useMemo(() => {
+    const query = modelSearch.trim().toLowerCase()
+    if (!query) return fetchedModels
+    return fetchedModels.filter((row) =>
+      row.name.toLowerCase().includes(query) || row.modelId.toLowerCase().includes(query))
+  }, [fetchedModels, modelSearch])
+
+  const checkedModelCount = useMemo(
+    () => fetchedModels.filter((row) => row.checked).length,
+    [fetchedModels],
+  )
+
   const handleAddOpenRouterChannel = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (!props.onAddOpenRouterChannel(channelDraft)) return
+    const models = fetchedModels
+      .filter((row) => row.checked && row.modelId)
+      .map((row) => ({ modelId: row.modelId, name: row.name, type: row.type }))
+    if (!props.onAddOpenRouterChannel({ ...channelDraft, models })) return
     setChannelDraft({
       slug: '',
       name: '',
       baseUrl: openRouterProvider?.baseUrl ?? '',
       apiKey: '',
     })
+    clearFetchedModels()
     setShowAddOpenRouterChannel(false)
   }
 
@@ -199,10 +324,80 @@ export function ApiConfigProviderList(props: ApiConfigProviderListProps) {
               className="glass-input-base w-full px-3 py-2 text-xs"
             />
           </label>
+          <div className="space-y-2 md:col-span-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={fetchingModels || !channelDraft.baseUrl.trim() || !channelDraft.apiKey.trim()}
+                onClick={() => { void handleFetchModels() }}
+                className="glass-btn-base glass-btn-soft px-3 py-2 text-xs disabled:opacity-50"
+              >
+                {fetchingModels ? labels.fetchingModels : labels.fetchModels}
+              </button>
+              {fetchModelsError && (
+                <span className="text-xs text-red-500">{fetchModelsError}</span>
+              )}
+              {(fetchSucceeded || fetchedModels.length > 0) && (
+                <span className="text-xs text-[var(--glass-text-secondary)]">
+                  {t('modelsSelected', { count: checkedModelCount })}
+                </span>
+              )}
+            </div>
+            {(fetchedModels.length > 0 || fetchSucceeded) && (
+              <div className="space-y-2">
+                {fetchedModels.length > 0 && (
+                  <input
+                    value={modelSearch}
+                    onChange={(event) => setModelSearch(event.target.value)}
+                    placeholder={labels.modelSearch}
+                    className="glass-input-base w-full px-3 py-2 text-xs"
+                  />
+                )}
+                <div className="max-h-64 space-y-1 overflow-y-auto rounded-lg border border-[var(--glass-stroke-base)] p-2">
+                  <p className="px-1 py-1 text-[11px] text-[var(--glass-text-tertiary)]">{labels.fetchedModelsHint}</p>
+                  {filteredFetchedModels.length === 0 ? (
+                    <p className="px-1 py-1 text-xs text-[var(--glass-text-tertiary)]">
+                      {modelSearch ? labels.noModelMatch : labels.noFetchedModels}
+                    </p>
+                  ) : (
+                    filteredFetchedModels.map((row) => (
+                      <div key={row.modelId} className="flex items-center gap-2 rounded-md px-1 py-1">
+                        <input
+                          type="checkbox"
+                          checked={row.checked}
+                          onChange={(event) => updateFetchedModel(row.modelId, { checked: event.target.checked })}
+                          className="h-3.5 w-3.5 shrink-0"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-xs text-[var(--glass-text-primary)]">{row.name}</p>
+                          <p className="truncate font-mono text-[10px] text-[var(--glass-text-tertiary)]">{row.modelId}</p>
+                        </div>
+                        <label className="flex shrink-0 items-center gap-1 text-[11px] text-[var(--glass-text-tertiary)]">
+                          {labels.modelType}
+                          <select
+                            value={row.type}
+                            onChange={(event) => updateFetchedModel(row.modelId, { type: event.target.value as UnifiedModelType })}
+                            className="glass-input-base px-2 py-1 text-xs"
+                          >
+                            {modelTypeOptions.map((type) => (
+                              <option key={type} value={type}>{modelTypeLabels[type]}</option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
           <div className="flex justify-end gap-2 md:col-span-2">
             <button
               type="button"
-              onClick={() => setShowAddOpenRouterChannel(false)}
+              onClick={() => {
+                clearFetchedModels()
+                setShowAddOpenRouterChannel(false)
+              }}
               className="glass-btn-base glass-btn-soft px-3 py-2 text-xs"
             >
               {labels.cancel}

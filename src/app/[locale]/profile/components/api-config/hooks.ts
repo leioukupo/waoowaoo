@@ -184,6 +184,38 @@ export function useProviders(): UseProvidersReturn {
         const next = [...latestProvidersRef.current, nextProvider]
         latestProvidersRef.current = next
         setProviders(next)
+
+        const nextModels = [...latestModelsRef.current]
+        for (const entry of draft.models ?? []) {
+            const modelId = entry.modelId.trim()
+            if (!modelId) continue
+            const modelKey = encodeModelKey(providerId, modelId)
+            const index = nextModels.findIndex((model) =>
+                model.modelKey === modelKey || (model.provider === providerId && model.modelId === modelId))
+            if (index >= 0) {
+                nextModels[index] = { ...nextModels[index], name: entry.name, type: entry.type }
+            } else {
+                nextModels.push({
+                    modelId,
+                    name: entry.name,
+                    type: entry.type,
+                    provider: providerId,
+                    modelKey,
+                    enabled: false,
+                })
+            }
+        }
+        // 新导入的模型只在对应槽位当前没有启用模型时才占据该槽位
+        for (const entry of draft.models ?? []) {
+            if (nextModels.some((model) => model.type === entry.type && model.enabled)) continue
+            const index = nextModels.findIndex((model) => model.type === entry.type && model.provider === providerId)
+            if (index >= 0) {
+                nextModels[index] = { ...nextModels[index], enabled: true }
+            }
+        }
+        latestModelsRef.current = nextModels
+        setModels(nextModels)
+
         void performSave().then((saved) => {
             if (saved) {
                 const settled = latestProvidersRef.current.map((provider) => (
@@ -195,9 +227,12 @@ export function useProviders(): UseProvidersReturn {
                 setProviders(settled)
                 return
             }
-            const reverted = latestProvidersRef.current.filter((provider) => provider.id !== providerId)
-            latestProvidersRef.current = reverted
-            setProviders(reverted)
+            const revertedProviders = latestProvidersRef.current.filter((provider) => provider.id !== providerId)
+            const revertedModels = latestModelsRef.current.filter((model) => model.provider !== providerId)
+            latestProvidersRef.current = revertedProviders
+            latestModelsRef.current = revertedModels
+            setProviders(revertedProviders)
+            setModels(revertedModels)
         })
         return true
     }, [data?.catalog?.providers, performSave, showToast, t])
