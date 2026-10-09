@@ -28,7 +28,7 @@ const DEFAULT_FIELD_TO_MODEL_TYPE: Readonly<Record<DefaultModelField, StoredMode
   assistantModel: 'llm',
 }
 
-const OPTIONAL_PRICING_PROVIDER_KEYS = new Set<string>()
+const OPTIONAL_PRICING_PROVIDER_KEYS = new Set<string>(['openai-compat'])
 
 function validateDefaultModelKey(field: DefaultModelField, value: unknown): string | null {
   // Contract anchor: default model key must be provider::modelId

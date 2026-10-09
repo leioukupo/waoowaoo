@@ -11,7 +11,7 @@ import {
     isPresetComingSoonModelKey,
     resolvePresetProviderName,
 } from './types'
-import type { OpenRouterChannelDraft } from './provider-card/types'
+import type { ChannelModelDraft, OpenAiCompatChannelDraft, OpenRouterChannelDraft } from './provider-card/types'
 import type { CapabilitySelections, UnifiedModelType } from '@/lib/ai-registry/types'
 import type { WorkflowConcurrencyConfig } from '@/lib/workflow-concurrency'
 import { useApiConfigSaver } from './editor'
@@ -25,6 +25,7 @@ import {
     mergeModelsForDisplay,
     mergeProvidersForDisplay,
     composeOpenRouterChannelId,
+    composeOpenAiCompatChannelId,
     normalizeOpenRouterChannelSlug,
     parseWorkflowConcurrency,
     replaceDefaultModelKey,
@@ -45,6 +46,7 @@ interface UseProvidersReturn {
     saveError: ApiConfigSaveError | null
     flushConfig: () => Promise<void>
     addOpenRouterChannel: (draft: OpenRouterChannelDraft) => boolean
+    addOpenAiCompatChannel: (draft: OpenAiCompatChannelDraft) => boolean
     updateProviderApiKey: (providerId: string, apiKey: string) => void
     updateProviderBaseUrl: (providerId: string, baseUrl: string) => void
     reorderProviders: (activeProviderId: string, overProviderId: string) => void
@@ -153,45 +155,39 @@ export function useProviders(): UseProvidersReturn {
     }, [performSave])
 
     // 提供商操作
-    const addOpenRouterChannel = useCallback((draft: OpenRouterChannelDraft): boolean => {
-        const catalogProvider = data?.catalog?.providers.find((provider) => provider.id === 'openrouter')
-        if (!catalogProvider) return false
-
-        const slug = normalizeOpenRouterChannelSlug(draft.slug)
-        const providerId = composeOpenRouterChannelId(slug)
-        if (!/^openrouter:[a-z0-9][a-z0-9_-]*$/.test(providerId)) {
+    const addCustomChannel = useCallback((input: {
+        catalogProvider: Provider
+        providerId: string
+        name: string
+        baseUrl: string
+        apiKey: string
+        models?: ChannelModelDraft[]
+    }): boolean => {
+        if (latestProvidersRef.current.some((provider) => provider.id.toLowerCase() === input.providerId)) {
             showToast(t('providerIdExists'), 'warning')
             return false
         }
-        if (latestProvidersRef.current.some((provider) => provider.id.toLowerCase() === providerId)) {
-            showToast(t('providerIdExists'), 'warning')
-            return false
-        }
-
-        const name = draft.name.trim()
-        const baseUrl = draft.baseUrl.trim()
-        if (!name || !baseUrl) return false
 
         const nextProvider: Provider = {
-            ...catalogProvider,
-            id: providerId,
-            name,
-            baseUrl,
+            ...input.catalogProvider,
+            id: input.providerId,
+            name: input.name,
+            baseUrl: input.baseUrl,
             featured: false,
-            apiKey: draft.apiKey.trim(),
-            hasApiKey: Boolean(draft.apiKey.trim()),
+            apiKey: input.apiKey,
+            hasApiKey: Boolean(input.apiKey),
         }
         const next = [...latestProvidersRef.current, nextProvider]
         latestProvidersRef.current = next
         setProviders(next)
 
         const nextModels = [...latestModelsRef.current]
-        for (const entry of draft.models ?? []) {
+        for (const entry of input.models ?? []) {
             const modelId = entry.modelId.trim()
             if (!modelId) continue
-            const modelKey = encodeModelKey(providerId, modelId)
+            const modelKey = encodeModelKey(input.providerId, modelId)
             const index = nextModels.findIndex((model) =>
-                model.modelKey === modelKey || (model.provider === providerId && model.modelId === modelId))
+                model.modelKey === modelKey || (model.provider === input.providerId && model.modelId === modelId))
             if (index >= 0) {
                 nextModels[index] = { ...nextModels[index], name: entry.name, type: entry.type }
             } else {
@@ -199,16 +195,16 @@ export function useProviders(): UseProvidersReturn {
                     modelId,
                     name: entry.name,
                     type: entry.type,
-                    provider: providerId,
+                    provider: input.providerId,
                     modelKey,
                     enabled: false,
                 })
             }
         }
         // 新导入的模型只在对应槽位当前没有启用模型时才占据该槽位
-        for (const entry of draft.models ?? []) {
+        for (const entry of input.models ?? []) {
             if (nextModels.some((model) => model.type === entry.type && model.enabled)) continue
-            const index = nextModels.findIndex((model) => model.type === entry.type && model.provider === providerId)
+            const index = nextModels.findIndex((model) => model.type === entry.type && model.provider === input.providerId)
             if (index >= 0) {
                 nextModels[index] = { ...nextModels[index], enabled: true }
             }
@@ -219,7 +215,7 @@ export function useProviders(): UseProvidersReturn {
         void performSave().then((saved) => {
             if (saved) {
                 const settled = latestProvidersRef.current.map((provider) => (
-                    provider.id === providerId
+                    provider.id === input.providerId
                         ? { ...provider, apiKey: undefined, hasApiKey: Boolean(nextProvider.apiKey) }
                         : provider
                 ))
@@ -227,15 +223,57 @@ export function useProviders(): UseProvidersReturn {
                 setProviders(settled)
                 return
             }
-            const revertedProviders = latestProvidersRef.current.filter((provider) => provider.id !== providerId)
-            const revertedModels = latestModelsRef.current.filter((model) => model.provider !== providerId)
+            const revertedProviders = latestProvidersRef.current.filter((provider) => provider.id !== input.providerId)
+            const revertedModels = latestModelsRef.current.filter((model) => model.provider !== input.providerId)
             latestProvidersRef.current = revertedProviders
             latestModelsRef.current = revertedModels
             setProviders(revertedProviders)
             setModels(revertedModels)
         })
         return true
-    }, [data?.catalog?.providers, performSave, showToast, t])
+    }, [performSave, showToast, t])
+
+    const addOpenRouterChannel = useCallback((draft: OpenRouterChannelDraft): boolean => {
+        const catalogProvider = data?.catalog?.providers.find((provider) => provider.id === 'openrouter')
+        if (!catalogProvider) return false
+        const providerId = composeOpenRouterChannelId(draft.slug)
+        if (!/^openrouter:[a-z0-9][a-z0-9_-]*$/.test(providerId)) {
+            showToast(t('providerIdExists'), 'warning')
+            return false
+        }
+        const name = draft.name.trim()
+        const baseUrl = draft.baseUrl.trim()
+        if (!name || !baseUrl) return false
+        return addCustomChannel({
+            catalogProvider,
+            providerId,
+            name,
+            baseUrl,
+            apiKey: draft.apiKey.trim(),
+            models: draft.models,
+        })
+    }, [data?.catalog?.providers, addCustomChannel, showToast, t])
+
+    const addOpenAiCompatChannel = useCallback((draft: OpenAiCompatChannelDraft): boolean => {
+        const catalogProvider = data?.catalog?.providers.find((provider) => provider.id === 'openai-compat')
+        if (!catalogProvider) return false
+        const providerId = composeOpenAiCompatChannelId(draft.slug)
+        if (!/^openai-compat:[a-z0-9][a-z0-9_-]*$/.test(providerId)) {
+            showToast(t('providerIdExists'), 'warning')
+            return false
+        }
+        const name = draft.name.trim()
+        const baseUrl = draft.baseUrl.trim()
+        if (!name || !baseUrl) return false
+        return addCustomChannel({
+            catalogProvider,
+            providerId,
+            name,
+            baseUrl,
+            apiKey: draft.apiKey.trim(),
+            models: draft.models,
+        })
+    }, [data?.catalog?.providers, addCustomChannel, showToast, t])
 
     const updateProviderApiKey = useCallback((providerId: string, apiKey: string) => {
         const previousProvider = latestProvidersRef.current.find((provider) => provider.id === providerId)
@@ -449,6 +487,7 @@ export function useProviders(): UseProvidersReturn {
         saveError,
         flushConfig,
         addOpenRouterChannel,
+        addOpenAiCompatChannel,
         updateProviderApiKey,
         updateProviderBaseUrl,
         reorderProviders,

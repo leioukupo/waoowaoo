@@ -3,8 +3,16 @@ import { getUserApiConfig, putUserApiConfig } from '@/lib/user-api/api-config'
 import type { ProjectAgentOperationRegistryDraft } from '@/lib/operations/types'
 import { defineOperation } from '@/lib/operations/define-operation'
 import { capabilitySelectionCommandSchema } from '@/lib/ai-registry/capability-selection-command'
+import { parseModelKeyStrict } from '@/lib/ai-registry/selection'
 
-const modelKeySchema = z.string().regex(/^(?:$|[^:]+::.+)$/)
+// 渠道 provider id 本身可含 ':'（如 openai-compat:deepseek），
+// 校验规则与运行期解析（parseModelKeyStrict，按首个 '::' 拆分）保持一致。
+const modelKeySchema = z
+  .string()
+  .refine(
+    (value) => value.trim() === '' || parseModelKeyStrict(value) !== null,
+    { message: 'assistantModel must be an empty string or a provider::modelId key' },
+  )
   .describe('Exact provider::modelId key of the Assistant model. Pass an empty string to clear it.')
 
 const apiConfigInputSchema = z.object({

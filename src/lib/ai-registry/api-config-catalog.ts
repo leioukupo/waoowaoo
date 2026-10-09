@@ -58,9 +58,11 @@ export function listApiConfigCatalogProviders(): ApiConfigCatalogProvider[] {
         ...(manifest.apiConfig.baseUrl ? { baseUrl: manifest.apiConfig.baseUrl } : {}),
         featured: isFeaturedApiConfigProvider(manifest.providerKey),
         connectionTest: Boolean(manifest.adapter.connectionTest),
-        modelTypes: Array.from(new Set(
-          manifest.catalogs.apiConfigModels.map((model) => model.type),
-        )),
+        modelTypes: manifest.apiConfig.modelTypes
+          ? [...manifest.apiConfig.modelTypes]
+          : Array.from(new Set(
+            manifest.catalogs.apiConfigModels.map((model) => model.type),
+          )),
       }]
     : [])
 }

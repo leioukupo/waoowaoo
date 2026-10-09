@@ -20,6 +20,15 @@ export interface OpenRouterChannelDraft {
   models?: ChannelModelDraft[]
 }
 
+/** OpenAI 兼容渠道：Base URL 必填，API Key 可选（本地 vLLM/LM Studio 等可留空）。 */
+export interface OpenAiCompatChannelDraft {
+  slug: string
+  name: string
+  baseUrl: string
+  apiKey: string
+  models?: ChannelModelDraft[]
+}
+
 export interface ProviderCardProps {
   provider: Provider
   dragHandle?: ReactNode

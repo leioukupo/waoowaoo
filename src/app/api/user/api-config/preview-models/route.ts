@@ -6,7 +6,8 @@ import { previewChannelModels } from '@/lib/user-api/api-config-preview-models'
 
 const requestSchema = z.object({
   baseUrl: z.string().min(1).max(500),
-  apiKey: z.string().min(1).max(500),
+  // OpenAI 兼容渠道允许不带 Key
+  apiKey: z.string().max(500).optional(),
 }).strict()
 
 export const POST = apiHandler(async (request: NextRequest) => {

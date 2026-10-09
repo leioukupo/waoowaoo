@@ -12,7 +12,7 @@ import type { StoredProvider } from '@/lib/user-api/api-config-types'
 import { parseStoredProviders } from '@/lib/user-api/api-config-provider-normalization'
 import { decryptApiKey } from '@/lib/crypto-utils'
 import { isApiConfigCatalogProviderId } from '@/lib/ai-registry/api-config-catalog'
-import { parseModelKeyStrict } from '@/lib/ai-registry/selection'
+import { getProviderKey, parseModelKeyStrict } from '@/lib/ai-registry/selection'
 import type { AiLlmProviderConfig } from '@/lib/ai-registry/types'
 import { getDeploymentConfig, isPlatformProviderCredentialMode } from '@/lib/deployment/config'
 import { resolveAiProviderManifest } from '@/lib/ai-providers/manifests'
@@ -254,7 +254,9 @@ export async function getProviderConfig(userId: string, providerId: string): Pro
   })
   const provider = pickProviderStrict(parseStoredProviders(pref?.customProviders), providerId)
 
-  if (!provider.apiKey) {
+  // OpenAI 兼容渠道（本地 vLLM/LM Studio 等）允许不带 API Key
+  const isOpenAiCompat = getProviderKey(provider.id) === 'openai-compat'
+  if (!provider.apiKey && !isOpenAiCompat) {
     throw new AppError('PROVIDER_AUTH_INVALID', 'Provider API key is missing', {
       provider: provider.id,
     })
@@ -263,7 +265,7 @@ export async function getProviderConfig(userId: string, providerId: string): Pro
   return {
     id: provider.id,
     name: provider.name,
-    apiKey: decryptApiKey(provider.apiKey),
+    apiKey: provider.apiKey ? decryptApiKey(provider.apiKey) : '',
     baseUrl: normalizeProviderRuntimeBaseUrl(provider.id, provider.baseUrl),
   }
 }

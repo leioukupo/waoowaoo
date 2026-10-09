@@ -27,6 +27,14 @@ export function composeOpenRouterChannelId(slug: string): string {
   return `openrouter:${normalizeOpenRouterChannelSlug(slug)}`
 }
 
+export function normalizeOpenAiCompatChannelSlug(value: string): string {
+  return normalizeOpenRouterChannelSlug(value)
+}
+
+export function composeOpenAiCompatChannelId(slug: string): string {
+  return `openai-compat:${normalizeOpenAiCompatChannelSlug(slug)}`
+}
+
 export const DEFAULT_MODEL_FIELDS = ['assistantModel'] as const satisfies ReadonlyArray<keyof DefaultModels>
 
 export function createInitialProviders(presetProviders: Provider[]): Provider[] {

@@ -26,6 +26,7 @@ export function ApiConfigTabContainer() {
     saveStatus,
     saveError,
     addOpenRouterChannel,
+    addOpenAiCompatChannel,
     updateProviderApiKey,
     updateProviderBaseUrl,
     reorderProviders,
@@ -124,6 +125,7 @@ export function ApiConfigTabContainer() {
             defaultModels={defaultModels}
             getModelsForProvider={getModelsForProvider}
             onAddOpenRouterChannel={addOpenRouterChannel}
+            onAddOpenAiCompatChannel={addOpenAiCompatChannel}
             onUpdateApiKey={updateProviderApiKey}
             onUpdateBaseUrl={updateProviderBaseUrl}
             onReorderProviders={reorderProviders}
@@ -138,10 +140,14 @@ export function ApiConfigTabContainer() {
               moreProviders: t('moreProviders'),
               addOpenRouterChannel: t('addOpenRouterChannel'),
               addOpenRouterChannelHint: t('addOpenRouterChannelHint'),
+              addOpenAiCompatChannel: t('addOpenAiCompatChannel'),
+              addOpenAiCompatChannelHint: t('addOpenAiCompatChannelHint'),
               channelName: t('channelName'),
               channelSlug: t('channelSlug'),
               apiKeyLabel: t('apiKeyLabel'),
+              apiKeyOptionalLabel: t('apiKeyOptionalLabel'),
               enterApiKey: t('enterApiKey'),
+              enterApiKeyOptional: t('enterApiKeyOptional'),
               baseUrl: t('baseUrl'),
               save: t('save'),
               cancel: t('cancel'),

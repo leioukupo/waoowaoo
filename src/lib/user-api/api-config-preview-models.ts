@@ -9,7 +9,8 @@ export interface PreviewModelEntry {
 
 export interface PreviewModelsInput {
   baseUrl: string
-  apiKey: string
+  /** OpenAI 兼容渠道可以不带 Key；留空时不发送 Authorization 头。 */
+  apiKey?: string
 }
 
 const FETCH_TIMEOUT_MS = 15_000
@@ -101,7 +102,10 @@ async function fetchEndpoint(endpoint: string, apiKey: string): Promise<PreviewM
   try {
     response = await fetch(endpoint, {
       method: 'GET',
-      headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
+      headers: {
+        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+        Accept: 'application/json',
+      },
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     })
   } catch (error) {
@@ -130,10 +134,7 @@ async function fetchEndpoint(endpoint: string, apiKey: string): Promise<PreviewM
 
 export async function previewChannelModels(input: PreviewModelsInput): Promise<{ models: PreviewModelEntry[] }> {
   const base = normalizeBaseUrl(input.baseUrl)
-  const apiKey = input.apiKey.trim()
-  if (!apiKey) {
-    throw new ApiError('INVALID_PARAMS', { code: 'PREVIEW_API_KEY_REQUIRED', field: 'apiKey' })
-  }
+  const apiKey = input.apiKey?.trim() ?? ''
   let lastError: ApiError | null = null
   for (const endpoint of buildEndpointCandidates(base)) {
     try {

@@ -115,6 +115,7 @@ const ZH_PROVIDER_NAME_MAP: Record<string, string> = {
     google: 'Google',
     fal: 'FAL',
     openrouter: 'OpenRouter',
+    'openai-compat': 'OpenAI 兼容',
 }
 
 function isZhLocale(locale?: string): boolean {

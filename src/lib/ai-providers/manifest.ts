@@ -41,6 +41,11 @@ export interface AiProviderManifest {
     readonly visibility: 'visible' | 'hidden'
     readonly name: string
     readonly baseUrl?: string
+    /**
+     * Model modalities user channels under this provider may store. Defaults
+     * to the union of the apiConfigModels catalog when omitted.
+     */
+    readonly modelTypes?: readonly UnifiedModelType[]
   }
   readonly platformCredentials?: {
     readonly envPrefix: string

@@ -1,4 +1,5 @@
 import { CORE_AI_PROVIDER_MANIFESTS } from '@/lib/ai-providers/core-manifests'
+import { MODEL_SLOT_TYPES } from '@/lib/ai-registry/media-model-selection'
 import type {
   AiProviderManifest,
   AiProviderManifestExtension,
@@ -40,6 +41,16 @@ function validateProviderManifests(manifests: readonly AiProviderManifest[]): vo
     }
     if (manifest.apiConfig && !manifest.platformCredentials) {
       throw new Error(`AI_PROVIDER_MANIFEST_PLATFORM_CREDENTIALS_MISSING:${providerKey}`)
+    }
+    if (manifest.apiConfig?.modelTypes !== undefined) {
+      if (manifest.apiConfig.modelTypes.length === 0) {
+        throw new Error(`AI_PROVIDER_MANIFEST_API_CONFIG_MODEL_TYPES_EMPTY:${providerKey}`)
+      }
+      for (const modelType of manifest.apiConfig.modelTypes) {
+        if (!MODEL_SLOT_TYPES.includes(modelType)) {
+          throw new Error(`AI_PROVIDER_MANIFEST_API_CONFIG_MODEL_TYPE_INVALID:${providerKey}:${modelType}`)
+        }
+      }
     }
     const catalogGroups: readonly (readonly { readonly provider: string }[])[] = [
       manifest.catalogs.capabilities,
