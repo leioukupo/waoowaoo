@@ -115,3 +115,6 @@ docs/**
 
 # Locally downloaded dev binaries (Stripe CLI)
 .tools/
+/.ffmpeg-mirror/
+./ddmpeg-mirror-server/*
+
