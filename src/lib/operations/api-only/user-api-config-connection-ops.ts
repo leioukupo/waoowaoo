@@ -1,6 +1,8 @@
 import { z } from 'zod'
 import { testLlmConnection } from '@/lib/ai-exec/llm-test-connection'
 import { testProviderConnection } from '@/lib/ai-exec/provider-test'
+import { probeProviderWire } from '@/lib/codex-model-gateway/wire-probe'
+import { getProviderKey } from '@/lib/ai-registry/selection'
 import type { ProjectAgentOperationRegistryDraft } from '@/lib/operations/types'
 import { getProviderConfig } from '@/lib/user-api/runtime-config'
 import { assertUserProviderConfigurationAvailable } from '@/lib/user-api/availability'
@@ -35,8 +37,10 @@ export function createUserApiConfigConnectionDiagnosticOperations(): ProjectAgen
         const startedAt = Date.now()
         const payload = input as Parameters<typeof testLlmConnection>[0]
         const result = await testLlmConnection(payload)
+        const wire = await probeOpenAiCompatWire(payload)
         return {
           success: true,
+          ...(wire ? { wire } : {}),
           latencyMs: Date.now() - startedAt,
           ...result,
         }
@@ -78,5 +82,36 @@ export function createUserApiConfigConnectionDiagnosticOperations(): ProjectAgen
         }
       },
     },
+  }
+}
+
+type LlmConnectionPayload = {
+  provider?: string
+  apiKey?: string
+  baseUrl?: string
+  model?: string
+}
+
+/**
+ * Best-effort wire probe for OpenAI-compatible channels: reports whether the
+ * endpoint speaks the OpenAI Responses API or only Chat Completions, so the
+ * UI can explain how assistant sessions will reach the provider.
+ */
+async function probeOpenAiCompatWire(payload: LlmConnectionPayload): Promise<string | null> {
+  const provider = typeof payload.provider === 'string'
+    ? payload.provider.trim().toLowerCase()
+    : ''
+  if (getProviderKey(provider).toLowerCase() !== 'openai-compat') return null
+  const baseUrl = typeof payload.baseUrl === 'string' ? payload.baseUrl.trim() : ''
+  const model = typeof payload.model === 'string' ? payload.model.trim() : ''
+  if (!baseUrl || !model) return null
+  try {
+    return await probeProviderWire({
+      baseUrl,
+      apiKey: typeof payload.apiKey === 'string' ? payload.apiKey : '',
+      model,
+    })
+  } catch {
+    return null
   }
 }

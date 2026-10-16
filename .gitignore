@@ -102,7 +102,6 @@ tmp/
 
 # Local documentation is ignored by default; tracked public guides are explicit.
 docs/**
-!docs/INSTALL.md
 !docs/architecture/
 !docs/architecture/**
 /artifacts/browser-security/

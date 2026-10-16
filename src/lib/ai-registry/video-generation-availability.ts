@@ -1,3 +1,4 @@
+import { getBillingModeSync } from '@/lib/billing/mode'
 import { resolveBuiltinPricing } from './pricing-resolution'
 import type { CapabilityValue, VideoCapabilities, VideoInputMode } from './types'
 
@@ -26,8 +27,12 @@ export function projectVideoGenerationAvailability(input: {
       }, (_, count) => count)
     }
   }
+  // Billing-OFF deployments never fail on price, so an unknown quote there
+  // only means "unquoted", not "unavailable".
+  const billingOff = getBillingModeSync() === 'OFF'
   const priced = (resolution: string, mode: VideoInputMode, containsVideoInput: boolean): boolean => (
-    aspectRatios.length > 0 && durations.length > 0
+    billingOff
+    || (aspectRatios.length > 0 && durations.length > 0
     && aspectRatios.every((aspectRatio) => durations.every((duration) => audioOptions.every((generateAudio) => imageCounts(mode).every((referenceImageCount) => {
       const selections: Record<string, CapabilityValue> = {
         resolution, aspectRatio, duration, generationMode: 'normal', containsVideoInput,
@@ -38,7 +43,7 @@ export function projectVideoGenerationAvailability(input: {
       const price = resolveBuiltinPricing({ apiType: 'video', model: modelKey, face: 'retail', selections })
       return price.status === 'resolved' && (price.mode === 'flat' || price.unit !== undefined)
     }))))
-  )
+  ))
   const resolutionOptions = nativeResolutions.filter((resolution) => nativeModes.some((mode) => priced(resolution, mode, false)))
   const supportedInputModes = nativeModes.filter((mode) => resolutionOptions.length > 0
     && resolutionOptions.every((resolution) => priced(resolution, mode, false)))

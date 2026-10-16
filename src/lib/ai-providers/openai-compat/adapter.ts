@@ -1,5 +1,6 @@
 import type { AiProviderAdapter } from '@/lib/ai-providers/runtime-types'
 import { createAiProviderFailureAdapter } from '@/lib/ai-providers/failure'
+import { openAiCompatConnectionTester } from './connection-test'
 import { createOpenAiCompatLanguageModel } from './language-model'
 
 export const openAiCompatAdapter: AiProviderAdapter = {
@@ -8,4 +9,5 @@ export const openAiCompatAdapter: AiProviderAdapter = {
   languageModel: {
     create: createOpenAiCompatLanguageModel,
   },
+  connectionTest: openAiCompatConnectionTester,
 }

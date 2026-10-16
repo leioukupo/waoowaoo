@@ -33,6 +33,11 @@ export async function getBillingMode(): Promise<BillingMode> {
   return getModeFromEnv()
 }
 
+/** Synchronous form for code paths that cannot await (hot calc loops). */
+export function getBillingModeSync(): BillingMode {
+  return getModeFromEnv()
+}
+
 export function getBootBillingEnabled() {
   return getModeFromEnv() === 'ENFORCE'
 }

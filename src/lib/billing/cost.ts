@@ -3,6 +3,8 @@ import {
   resolveBuiltinPricing,
   type PricingResolution,
 } from '@/lib/ai-registry/pricing-resolution'
+import { getBillingModeSync } from './mode'
+import type { BuiltinPricingDefinition } from '@/lib/ai-registry/pricing-catalog'
 import type { CapabilityValue } from '@/lib/ai-registry/types'
 import { resolveImageSizeFromGenerationOptions } from '@/lib/image-generation/runtime-options'
 import { BillingOperationError } from './errors'
@@ -120,12 +122,21 @@ function throwPricingResolutionError(
  *
  * Billing only ever reads the retail face — the cost face exists for margin
  * reporting and never reaches a user-facing amount.
+ *
+ * Billing-OFF deployments never charge, so a model without a catalog price
+ * quotes zero instead of throwing; SHADOW/ENFORCE still fail loudly, because
+ * silently zero-pricing an unknown model there is how unbilled usage happens.
  */
 function resolveCatalogPricing(input: {
   apiType: ApiType
   model: string
   selections?: Record<string, CapabilityValue>
-}): Extract<PricingResolution, { status: 'resolved' }> {
+}): {
+  readonly amount: number
+  readonly mode: 'flat' | 'capability'
+  readonly unit?: BuiltinPricingDefinition['unit']
+  readonly entryProvider: string | null
+} {
   ensureAiCatalogsRegistered()
   const resolution = resolveBuiltinPricing({
     apiType: input.apiType,
@@ -133,7 +144,17 @@ function resolveCatalogPricing(input: {
     face: 'retail',
     selections: input.selections,
   })
-  if (resolution.status === 'resolved') return resolution
+  if (resolution.status === 'resolved') {
+    return {
+      amount: resolution.amount,
+      mode: resolution.mode,
+      unit: resolution.unit,
+      entryProvider: resolution.entry.provider,
+    }
+  }
+  if (getBillingModeSync() === 'OFF') {
+    return { amount: 0, mode: 'flat', unit: 'per_call', entryProvider: null }
+  }
   return throwPricingResolutionError(input.apiType, input.model, resolution)
 }
 
@@ -166,7 +187,7 @@ export function calcTextWithCache(
       normalizePositiveInteger(metadata?.cachedInputTokens ?? 0),
       normalizedInputTokens,
     )
-    const useGoogleContextCachePricing = inputPricing.entry.provider === 'google' && cachedInputTokens > 0
+    const useGoogleContextCachePricing = inputPricing.entryProvider === 'google' && cachedInputTokens > 0
     const fullPriceInputTokens = useGoogleContextCachePricing
       ? normalizedInputTokens - cachedInputTokens
       : normalizedInputTokens
@@ -212,6 +233,7 @@ export function calcTextToolCalls(model: string, toolCalls: number): number {
   })
   if (resolution.status === 'missing_capability_match') return 0
   if (resolution.status !== 'resolved') {
+    if (getBillingModeSync() === 'OFF') return 0
     return throwPricingResolutionError('text', model, resolution)
   }
   return roundCredits((normalizedToolCalls / 1_000_000) * resolution.amount)

@@ -4,7 +4,7 @@
 FROM docker:27.5.1-cli@sha256:851f91d241214e7c6db86513b270d58776379aacc5eb9c4a87e5b47115e3065c AS docker-cli
 
 # ==================== Shared glibc/OpenSSL base ====================
-FROM node:22-bookworm-slim AS base
+FROM node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392 AS base
 
 # Prisma generation must detect the same OpenSSL ABI used at runtime, while
 # Temporal's native bridge requires glibc rather than Alpine/musl.
@@ -28,8 +28,13 @@ ENV DEPLOYMENT_EDITION=$DEPLOYMENT_EDITION
 # tree with ee/ physically absent still builds this same Dockerfile.
 COPY . .
 # ffmpeg-ffprobe-static's install script downloads its release binaries from
-# GitHub. On networks where GitHub is unreachable, point it at a local mirror
-# (the script honors this base URL natively); empty keeps the GitHub default.
+# GitHub. On networks where GitHub is unreachable, point it at the compose
+# ffmpeg-mirror service by its fixed address (http://172.30.0.8:8471): a
+# container name cannot be resolved from buildkit's exec containers, whose
+# DNS is the image's baked-in resolv.conf. The numeric address routes across
+# the shared 172.30.0.0/16 subnet, so the build must run through a builder
+# attached to that network (scripts/setup-buildx-mirror-builder.sh).
+# Empty keeps the GitHub default.
 ARG FFMPEG_FFPROBE_STATIC_BASE_URL=
 ENV FFMPEG_FFPROBE_STATIC_BASE_URL=$FFMPEG_FFPROBE_STATIC_BASE_URL
 RUN --mount=type=cache,target=/root/.npm \

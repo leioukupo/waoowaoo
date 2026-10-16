@@ -1,5 +1,11 @@
 import type { AiOptionSchema, VideoCapabilities } from '@/lib/ai-registry/types'
 import {
+  OPENROUTER_STANDARD_VIDEO_ASPECT_RATIOS,
+  OPENROUTER_STANDARD_VIDEO_MAX_REFERENCE_IMAGES,
+  OPENROUTER_STANDARD_VIDEO_RESOLUTIONS,
+  standardOpenRouterVideoCapabilities,
+} from '@/lib/ai-registry/openrouter-standard-capabilities'
+import {
   booleanValidator,
   buildMediaOptionSchema,
   enumValidator,
@@ -51,9 +57,23 @@ const HAILUO_WIRE_OPTIONS = {
   watermark: { provider: 'minimax', parameter: 'aigc_watermark' },
 } as const
 const HAILUO_ASPECT_RATIOS = ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'] as const
-const HAILUO_COMMON_CAPABILITIES = {
+// The OpenRouter MiniMax family shares one capability surface: both H3 and
+// H3 Max accept text, first/last keyframes and reference images
+// (/api/v1/videos/models, checked 2026-10-14). Resolution tiers stay
+// priced per model, so the availability projection still trims each
+// model to the tiers its pricing catalog quotes.
+const HAILUO_CAPABILITIES = {
+  supportedInputModes: ['text_to_video', 'first_frame', 'first_last_frame', 'reference'],
   supportsTextToVideo: true,
+  generationModeOptions: ['normal', 'firstlastframe'],
+  generateAudioOptions: [true, false],
+  supportGenerateAudio: true,
   durationOptions: OPENROUTER_HAILUO_DURATION_OPTIONS,
+  resolutionOptions: ['480p', '768p', '2K'],
+  firstlastframe: true,
+  assetReferenceMultiReference: true,
+  maxReferenceImages: OPENROUTER_HAILUO_3_MAX_REFERENCE_IMAGES,
+  maxReferenceFiles: OPENROUTER_HAILUO_3_MAX_REFERENCE_IMAGES,
 } satisfies VideoCapabilities
 
 const SEEDANCE_2_CAPABILITIES = {
@@ -118,41 +138,24 @@ export const OPENROUTER_VIDEO_MODELS: readonly OpenRouterVideoModel[] = [
     ...HAILUO_WIRE_OPTIONS,
     name: 'MiniMax H3',
     aspectRatios: HAILUO_ASPECT_RATIOS,
-    capabilities: {
-      ...HAILUO_COMMON_CAPABILITIES,
-      supportedInputModes: ['text_to_video', 'first_frame', 'first_last_frame', 'reference'],
-      generationModeOptions: ['normal', 'firstlastframe'],
-      firstlastframe: true,
-      resolutionOptions: ['2K'],
-      supportGenerateAudio: true,
-      generateAudioOptions: [true, false],
-      assetReferenceMultiReference: true,
-      maxReferenceImages: OPENROUTER_HAILUO_3_MAX_REFERENCE_IMAGES,
-      maxReferenceFiles: OPENROUTER_HAILUO_3_MAX_REFERENCE_IMAGES,
-    },
+    capabilities: HAILUO_CAPABILITIES,
   },
   {
     modelId: OPENROUTER_HAILUO_3_MAX_VIDEO_MODEL_ID,
     ...HAILUO_WIRE_OPTIONS,
     name: 'MiniMax H3 Max',
     aspectRatios: HAILUO_ASPECT_RATIOS,
-    capabilities: {
-      ...HAILUO_COMMON_CAPABILITIES,
-      // OpenRouter accepts one keyframe for H3 Max, not a first/last pair.
-      supportedInputModes: ['text_to_video', 'first_frame'],
-      generationModeOptions: ['normal'],
-      firstlastframe: false,
-      resolutionOptions: ['480p', '768p'],
-      supportGenerateAudio: false,
-      assetReferenceMultiReference: false,
-    },
+    capabilities: HAILUO_CAPABILITIES,
   },
 ]
 
-export const OPENROUTER_VIDEO_MODEL_IDS = new Set(OPENROUTER_VIDEO_MODELS.map(({ modelId }) => modelId))
+
+export function tryResolveOpenRouterVideoModel(modelId: string | undefined): OpenRouterVideoModel | null {
+  return OPENROUTER_VIDEO_MODELS.find((candidate) => candidate.modelId === modelId) ?? null
+}
 
 export function resolveOpenRouterVideoModel(modelId: string | undefined): OpenRouterVideoModel {
-  const model = OPENROUTER_VIDEO_MODELS.find((candidate) => candidate.modelId === modelId)
+  const model = tryResolveOpenRouterVideoModel(modelId)
   if (!model) throw new Error(`OPENROUTER_VIDEO_MODEL_UNSUPPORTED:${modelId ?? '<missing>'}`)
   return model
 }
@@ -192,6 +195,40 @@ export function buildOpenRouterVideoOptionSchema(modelId: string | undefined): A
         return { ok: false, reason: 'reference_audio_requires_visual' }
       }
       if (options.lastFrameImageUrl && images + audios + videos > 0) {
+        return { ok: false, reason: 'frame_with_references' }
+      }
+      return { ok: true }
+    }],
+  })
+}
+
+/**
+ * Standard OpenRouter wire for video models outside the curated list:
+ * normalized resolution tiers, aspect ratios, durations and image
+ * references. Audio and video references stay closed because only specific
+ * curated providers honor them.
+ */
+export function buildOpenRouterStandardVideoOptionSchema(): AiOptionSchema {
+  const caps = standardOpenRouterVideoCapabilities().video
+  return buildMediaOptionSchema('video', {
+    allowedKeys: ['referenceImages'],
+    excludedKeys: [
+      'size', 'promptExtend', 'serviceTier', 'executionExpiresAfter', 'returnLastFrame', 'draft', 'cameraFixed',
+      'watermark',
+    ],
+    validators: {
+      duration: (value) => value === undefined || (typeof value === 'number' && (caps?.durationOptions ?? []).includes(value))
+        ? { ok: true } : { ok: false, reason: 'unsupported_duration' },
+      aspectRatio: enumValidator(OPENROUTER_STANDARD_VIDEO_ASPECT_RATIOS),
+      resolution: enumValidator(OPENROUTER_STANDARD_VIDEO_RESOLUTIONS),
+      generateAudio: booleanValidator(),
+      seed: integerRangeValidator({}),
+      referenceImages: stringArrayValidator({ maxLength: OPENROUTER_STANDARD_VIDEO_MAX_REFERENCE_IMAGES }),
+    },
+    objectValidators: [(options) => {
+      const images = Array.isArray(options.referenceImages) ? options.referenceImages.length : 0
+      if (images > (caps?.maxReferenceFiles ?? 0)) return { ok: false, reason: 'total_reference_limit_exceeded' }
+      if (typeof options.lastFrameImageUrl === 'string' && options.lastFrameImageUrl.trim() && images > 0) {
         return { ok: false, reason: 'frame_with_references' }
       }
       return { ok: true }

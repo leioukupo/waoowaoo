@@ -1,9 +1,11 @@
 import { findBuiltinCapabilities } from '@/lib/ai-registry/capabilities-catalog'
+import { getProviderKey } from '@/lib/ai-registry/selection'
 import { ensureAiCatalogsRegistered } from '@/lib/ai-exec/catalog-bootstrap'
 import { resolveLlmRuntimeModel } from '@/lib/ai-exec/llm-runtime'
 import { getUserModelConfig } from '@/lib/config-service'
 import { getProviderConfig } from '@/lib/user-api/runtime-config'
 import { verifyWaoRuntimeToken } from '@/lib/wao-mcp/runtime-token'
+import { probeProviderWire } from './wire-probe'
 import {
   CODEX_MODEL_GATEWAY_ASSISTANT_ID,
   CODEX_MODEL_GATEWAY_PATH,
@@ -13,6 +15,14 @@ import {
   type CodexModelGatewayRuntimeConfig,
   type CodexModelGatewayScope,
 } from './contracts'
+
+function baseProviderKey(provider: string): string {
+  return getProviderKey(provider).toLowerCase()
+}
+
+export function isOpenAiCompatibleProvider(provider: string): boolean {
+  return baseProviderKey(provider) === 'openai-compat'
+}
 
 function requireIdentity(value: string): string {
   if (!value || value !== value.trim()) {
@@ -98,19 +108,28 @@ async function resolveSelectedAssistantModel(scope: CodexModelGatewayScope) {
   } catch {
     throw new CodexModelGatewayError('ASSISTANT_MODEL_UNSUPPORTED', 422)
   }
-  if (selection.provider !== 'openrouter') {
-    throw new CodexModelGatewayError(
-      'PROVIDER_RESPONSES_UNSUPPORTED',
-      422,
-    )
-  }
-  ensureAiCatalogsRegistered()
-  const codexRuntimeWireApi = findBuiltinCapabilities(
-    'llm',
-    selection.provider,
-    selection.modelId,
-  )?.llm?.codexRuntimeWireApi
-  if (codexRuntimeWireApi !== 'responses') {
+  let wire: 'responses' | 'chat'
+  if (baseProviderKey(selection.provider) === 'openrouter') {
+    // OpenRouter routes the Responses wire natively for the curated
+    // catalog models; the capability entry is the source of truth.
+    ensureAiCatalogsRegistered()
+    const codexRuntimeWireApi = findBuiltinCapabilities(
+      'llm',
+      selection.provider,
+      selection.modelId,
+    )?.llm?.codexRuntimeWireApi
+    if (codexRuntimeWireApi !== 'responses') {
+      throw new CodexModelGatewayError(
+        'PROVIDER_RESPONSES_UNSUPPORTED',
+        422,
+      )
+    }
+    wire = 'responses'
+  } else if (isOpenAiCompatibleProvider(selection.provider)) {
+    // OpenAI-compatible channels may only implement Chat Completions; the
+    // wire is probed (cached) after the provider config is resolved.
+    wire = 'chat'
+  } else {
     throw new CodexModelGatewayError(
       'PROVIDER_RESPONSES_UNSUPPORTED',
       422,
@@ -133,10 +152,41 @@ async function resolveSelectedAssistantModel(scope: CodexModelGatewayScope) {
   if (!providerBaseUrl) {
     throw new CodexModelGatewayError('PROVIDER_BASE_URL_INVALID', 503)
   }
+  if (isOpenAiCompatibleProvider(selection.provider)) {
+    wire = await resolveOpenAiCompatibleWire({
+      baseUrl: providerBaseUrl,
+      apiKey: providerConfig.apiKey,
+      modelId: selection.modelId,
+    })
+  }
   return {
     selection,
     providerApiKey: providerConfig.apiKey,
-    responsesEndpoint: buildResponsesEndpoint(providerBaseUrl),
+    providerBaseUrl,
+    wire,
+  }
+}
+
+/**
+ * Determines which wire an OpenAI-compatible endpoint actually speaks. The
+ * probe is best-effort and cached per (baseUrl, model); an inconclusive
+ * result falls back to the Chat Completions bridge, which every
+ * OpenAI-compatible server implements.
+ */
+async function resolveOpenAiCompatibleWire(params: {
+  readonly baseUrl: string
+  readonly apiKey: string
+  readonly modelId: string
+}): Promise<'responses' | 'chat'> {
+  try {
+    const wire = await probeProviderWire({
+      baseUrl: params.baseUrl,
+      apiKey: params.apiKey,
+      model: params.modelId,
+    })
+    return wire === 'responses' ? 'responses' : 'chat'
+  } catch {
+    return 'chat'
   }
 }
 
@@ -146,16 +196,29 @@ export async function resolveCodexModelGatewayUpstream(
   readonly runtimeModelId: string
   readonly modelId: string
   readonly modelKey: string
-  readonly responsesEndpoint: string
+  readonly providerKey: string
+  readonly providerBaseUrl: string
+  readonly wire: 'responses' | 'chat'
+  readonly responsesEndpoint: string | null
+  readonly chatEndpoint: string | null
   readonly providerApiKey: string
 }> {
   const scope = normalizeCodexModelGatewayScope(scopeValue)
   const resolved = await resolveSelectedAssistantModel(scope)
+  const base = resolved.providerBaseUrl.replace(/\/+$/u, '')
   return {
     runtimeModelId: resolveCodexRuntimeModelId(resolved.selection.modelId),
     modelId: resolved.selection.modelId,
     modelKey: resolved.selection.modelKey,
-    responsesEndpoint: resolved.responsesEndpoint,
+    providerKey: resolved.selection.provider,
+    providerBaseUrl: resolved.providerBaseUrl,
+    wire: resolved.wire,
+    responsesEndpoint: resolved.wire === 'responses'
+      ? buildResponsesEndpoint(resolved.providerBaseUrl)
+      : null,
+    chatEndpoint: resolved.wire === 'chat'
+      ? `${base}/chat/completions`
+      : null,
     providerApiKey: resolved.providerApiKey,
   }
 }

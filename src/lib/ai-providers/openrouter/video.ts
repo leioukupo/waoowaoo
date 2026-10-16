@@ -10,10 +10,7 @@ import type {
   GenerateResult,
 } from '@/lib/ai-providers/runtime-types'
 import { requireSelectedModelId } from '@/lib/ai-providers/shared/model-selection'
-import {
-  OPENROUTER_VIDEO_MODEL_IDS,
-  resolveOpenRouterVideoModel,
-} from './video-models'
+import { tryResolveOpenRouterVideoModel } from './video-models'
 import {
   createOpenRouterVideoClient,
   serializeErrorForLog,
@@ -78,11 +75,14 @@ function buildSharedVideoRequest(input: {
 }): OpenRouterVideoRequest {
   const prompt = typeof input.options.prompt === 'string' ? input.options.prompt.trim() : ''
   if (!prompt) throw new Error('OPENROUTER_VIDEO_PROMPT_REQUIRED')
-  const { watermark } = resolveOpenRouterVideoModel(input.modelId)
+  const model = tryResolveOpenRouterVideoModel(input.modelId)
 
   return {
     model: input.modelId,
     prompt,
+    // Always present (possibly empty) so OpenRouter-compatible endpoints
+    // never see an undefined input_references key.
+    inputReferences: [],
     ...(typeof input.options.duration === 'number' ? { duration: input.options.duration } : {}),
     ...(input.options.resolution
       ? { resolution: input.options.resolution as NonNullable<VideoGenerationRequest['resolution']> }
@@ -92,8 +92,8 @@ function buildSharedVideoRequest(input: {
       : {}),
     ...(typeof input.options.generateAudio === 'boolean' ? { generateAudio: input.options.generateAudio } : {}),
     ...(typeof input.options.seed === 'number' ? { seed: input.options.seed } : {}),
-    ...(typeof input.options.watermark === 'boolean'
-      ? { provider: { options: { [watermark.provider]: { parameters: { [watermark.parameter]: input.options.watermark } } } } }
+    ...(typeof input.options.watermark === 'boolean' && model
+      ? { provider: { options: { [model.watermark.provider]: { parameters: { [model.watermark.parameter]: input.options.watermark } } } } }
       : {}),
   }
 }
@@ -368,9 +368,6 @@ export async function executeOpenRouterVideoGeneration(input: AiProviderVideoExe
   const { apiKey, baseUrl } = input.providerConfig
   const normalizedBaseUrl = requireOpenRouterBaseUrl(baseUrl, 'video')
   const modelId = requireSelectedModelId(input.selection, 'openrouter:video')
-  if (!OPENROUTER_VIDEO_MODEL_IDS.has(modelId)) {
-    throw new Error(`OPENROUTER_VIDEO_MODEL_UNSUPPORTED: ${modelId}`)
-  }
 
   const options: OpenRouterVideoOptions = input.options ?? {}
 

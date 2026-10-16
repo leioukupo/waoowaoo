@@ -5,7 +5,7 @@
     "resolution": "分辨率",
     "quality": "图片质量",
     "aspectRatio": "画幅比例",
-    "reasoningEffort": "Reasoning effort",
+    "reasoningEffort": "思考强度",
     "rate": "语速",
     "mode": "模式",
     "generateAudio": "生成音频"

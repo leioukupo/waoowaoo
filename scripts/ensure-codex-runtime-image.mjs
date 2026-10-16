@@ -38,7 +38,26 @@ function writeState(value) {
   fs.renameSync(temporary, stateFile)
 }
 
+function dockerReachable() {
+  try {
+    execFileSync('docker', ['info', '--format', 'ok'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+    return true
+  } catch {
+    return false
+  }
+}
+
 const previous = (() => { try { return JSON.parse(fs.readFileSync(stateFile, 'utf8')) } catch { return null } })()
+
+// Containers without a Docker socket (for example an external Temporal worker)
+// cannot inspect or build the runtime image. Leave the shared state file
+// untouched so the Web container keeps its attested image reference.
+if (!dockerReachable()) {
+  process.stderr.write('Codex Runtime image check skipped: Docker daemon unreachable\n')
+  process.exitCode = 2
+  process.exit(2)
+}
+
 let fingerprint = null
 try {
   fingerprint = hashInputs()
@@ -53,8 +72,11 @@ try {
     process.exit(0)
   }
 
+  const aptMirror = process.env.CODEX_APT_MIRROR?.trim()
   execFileSync('docker', [
-    'build', '--label', `wao.codex.runtime.source-sha=${fingerprint}`,
+    'build',
+    ...(aptMirror ? ['--build-arg', `APT_MIRROR=${aptMirror}`] : []),
+    '--label', `wao.codex.runtime.source-sha=${fingerprint}`,
     '--file', path.join(root, dockerfile), '--tag', image, root,
   ], { stdio: 'inherit', env: { ...process.env, DOCKER_BUILDKIT: process.env.DOCKER_BUILDKIT || '1' } })
   const built = inspect()

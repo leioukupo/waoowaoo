@@ -10,7 +10,7 @@ import type { Prisma } from '@prisma/client'
 import { encryptApiKey } from '@/lib/crypto-utils'
 import { ApiError } from '@/lib/api-errors'
 import { buildApiConfigServerCatalog } from '@/lib/ai-registry/api-config-catalog'
-import { getFixedParameterFields, type FixedParameterFieldsByModel } from '@/lib/ai-registry/fixed-parameters'
+import { getFixedParameterFieldsForModel, type FixedParameterFieldsByModel } from '@/lib/ai-registry/fixed-parameters'
 import { ensureAiCatalogsRegistered } from '@/lib/ai-exec/catalog-bootstrap'
 import { getBillingMode } from '@/lib/billing/mode'
 import { getDeploymentConfig, toPublicDeploymentConfig } from '@/lib/deployment/config'
@@ -117,7 +117,7 @@ export async function getUserApiConfig(userId: string) {
   const fixedParameterFields: FixedParameterFieldsByModel = Object.fromEntries(
     [...catalog.models, ...pricedModels].map((model) => [
       `${model.provider}::${model.modelId}`,
-      getFixedParameterFields(model.type, resolveBuiltinCapabilities(model.type, model.provider, model.modelId)),
+      getFixedParameterFieldsForModel(model.type, model.provider, resolveBuiltinCapabilities(model.type, model.provider, model.modelId)),
     ]),
   )
 

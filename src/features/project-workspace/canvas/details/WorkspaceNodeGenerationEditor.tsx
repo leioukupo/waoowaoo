@@ -11,6 +11,7 @@ import type {
   WorkspaceResourceRegenerationReference,
   WorkspaceResourceRegenerationTemplate,
 } from '@/lib/workspace-resource/regeneration'
+import { copyPlainText } from '@/lib/clipboard'
 import { workspaceCanvasScrollableRegionProps } from '../canvas-scroll-lock'
 import { AspectRatioPicker } from '../controls/AspectRatioPicker'
 import { GenerationParameterFields } from '../controls/GenerationParameterFields'
@@ -38,11 +39,11 @@ function CopyPromptButton({ prompt }: { readonly prompt: string }) {
   const actionLabels = useTranslations('projectWorkflow.canvas.workspace.actions')
   const { showError, showToast } = useToast()
   const copyPrompt = async () => {
-    try {
-      await navigator.clipboard.writeText(prompt)
+    const ok = await copyPlainText(prompt)
+    if (ok) {
       showToast(actionLabels('copyPromptSuccess'), 'success')
-    } catch (error) {
-      showError(error, actionLabels('copyPromptFailed'))
+    } else {
+      showError(new Error('CLIPBOARD_COPY_FAILED'), actionLabels('copyPromptFailed'))
     }
   }
   return (

@@ -14,6 +14,7 @@ import {
 import type { OperationPlanView } from '@/lib/operations/plan-contract'
 import { MarkdownTextPart } from './MarkdownTextPart'
 import { readProjectAssistantTextAttachmentsFromMetadata } from '@/lib/project-agent/text-attachments'
+import { copyPlainText } from '@/lib/clipboard'
 import { readProjectAssistantMediaAttachmentsFromMetadata } from '@/lib/project-agent/media-attachments'
 import { WorkspaceAssistantThinkingStatus, WorkspaceAssistantWorkTrace } from './WorkspaceAssistantWorkTrace'
 import type { WorkspaceAssistantWorkTraceView } from './workspace-assistant-message-projection'
@@ -353,7 +354,8 @@ function WorkspaceAssistantAssistantMessageFooter() {
   if (running || !text) return null
 
   const copyAnswer = (): void => {
-    void navigator.clipboard.writeText(text).then(() => {
+    void copyPlainText(text).then((ok) => {
+      if (!ok) return
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1500)
     })

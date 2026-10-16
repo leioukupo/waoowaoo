@@ -7,6 +7,10 @@ import {
   type UnifiedModelType,
 } from '@/lib/ai-registry/types'
 import {
+  standardOpenRouterImageCapabilities,
+  standardOpenRouterVideoCapabilities,
+} from './openrouter-standard-capabilities'
+import {
   cloneCapabilities,
   getProviderKey,
   isCapabilityValue,
@@ -220,7 +224,16 @@ export function resolveBuiltinCapabilitiesByModelKey(
 ): ModelCapabilities | undefined {
   const parsed = parseModelKeyStrict(modelKey)
   if (!parsed) return undefined
-  return findBuiltinCapabilities(modelType, parsed.provider, parsed.modelId)
+  const found = findBuiltinCapabilities(modelType, parsed.provider, parsed.modelId)
+  if (found) return found
+  // OpenRouter-compatible endpoints outside the curated catalog still speak
+  // the standard OpenRouter wire, so they get that standard capability
+  // surface instead of none.
+  if (getProviderKey(parsed.provider) === 'openrouter') {
+    if (modelType === 'image') return standardOpenRouterImageCapabilities()
+    if (modelType === 'video') return standardOpenRouterVideoCapabilities()
+  }
+  return undefined
 }
 
 export function resetBuiltinCapabilityCatalogCacheForTest() {

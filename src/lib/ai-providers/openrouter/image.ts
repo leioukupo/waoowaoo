@@ -28,7 +28,6 @@ import {
   resolveOpenRouterImageInput,
   type OpenRouterImageOptions,
 } from './image-options'
-import { OPENROUTER_IMAGE_MODEL_IDS } from './models'
 import { ProviderSubmissionError } from '@/lib/ai-exec/submission-error'
 import {
   classifyOpenRouterMachineErrorCode,
@@ -212,9 +211,6 @@ export async function requestOpenRouterImage(input: {
   options: OpenRouterImageOptions
 }): Promise<GenerateResult> {
   if (!input.apiKey.trim()) throw new AppError('PROVIDER_AUTH_INVALID', undefined, { provider: 'openrouter' })
-  if (!OPENROUTER_IMAGE_MODEL_IDS.has(input.modelId)) {
-    throw new Error(`OPENROUTER_IMAGE_MODEL_UNSUPPORTED: ${input.modelId}`)
-  }
   const resolved = await resolveOpenRouterImageInput(input)
   const logger = createScopedLogger({
     module: 'worker.openrouter-image',

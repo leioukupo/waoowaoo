@@ -96,6 +96,9 @@
     "rateLimited": "The provider is rate limiting this account. Wait and retry.",
     "skippedModelsFailure": "Skipped because the credential check failed.",
     "skippedSpend": "Skipped to avoid a billable generation.",
+    "responsesSupported": "The provider supports the OpenAI Responses API; assistant sessions will use it directly.",
+    "chatOnly": "The provider only supports Chat Completions; assistant sessions are bridged automatically.",
+    "wireUnknown": "The provider wire could not be determined; assistant sessions fall back to Chat Completions.",
     "textGenerationOk": "Text generation succeeded.",
     "timeout": "The provider did not respond in time. Retry later."
   },

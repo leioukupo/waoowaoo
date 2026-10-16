@@ -1,8 +1,10 @@
 import { ApiError } from '@/lib/api-errors'
 import { parseModelKeyStrict } from '@/lib/ai-registry/selection'
+import { getProviderKey } from '@/lib/ai-registry/selection'
 import { resolveBuiltinModelContext, validateCapabilitySelectionsPayload } from '@/lib/ai-registry/capabilities-catalog'
 import { getFixedParameterFields } from '@/lib/ai-registry/fixed-parameters'
-import type { CapabilitySelections } from '@/lib/ai-registry/types'
+import { isReasoningEffort, REASONING_EFFORT_VALUES } from '@/lib/ai-registry/reasoning-effort'
+import type { CapabilitySelections, CapabilityValue } from '@/lib/ai-registry/types'
 import type { StoredModel } from './api-config-types'
 import { CAPABILITY_MODEL_TYPES } from './api-config-types'
 import { isRecord } from './api-config-shared'
@@ -98,12 +100,42 @@ function resolveCapabilityContextForModelKey(
   return null
 }
 
+function isOpenAiCompatModelKey(modelKey: string): boolean {
+  const parsed = parseModelKeyStrict(modelKey)
+  return !!parsed && getProviderKey(parsed.provider).toLowerCase() === 'openai-compat'
+}
+
+// OpenAI-compatible LLM models are outside the builtin capability catalog, so
+// they are validated against the single application-owned field instead of
+// the catalog payload validator (which would report CAPABILITY_MODEL_UNSUPPORTED).
+function validateOpenAiCompatLlmSelection(modelKey: string, selection: Record<string, CapabilityValue>) {
+  for (const [field, value] of Object.entries(selection)) {
+    if (field !== 'reasoningEffort') {
+      throw new ApiError('INVALID_PARAMS', {
+        code: 'CAPABILITY_FIELD_INVALID',
+        field: `capabilityDefaults.${modelKey}.${field}`,
+      })
+    }
+    if (!isReasoningEffort(value)) {
+      throw new ApiError('INVALID_PARAMS', {
+        code: 'CAPABILITY_VALUE_NOT_ALLOWED',
+        field: `capabilityDefaults.${modelKey}.${field}`,
+        allowedValues: [...REASONING_EFFORT_VALUES],
+      })
+    }
+  }
+}
+
 export function validateCapabilitySelectionsAgainstModels(
   selections: CapabilitySelections,
   models: StoredModel[],
 ) {
   const modelMap = buildStoredModelMap(models)
   for (const [modelKey, selection] of Object.entries(selections)) {
+    if (isOpenAiCompatModelKey(modelKey)) {
+      validateOpenAiCompatLlmSelection(modelKey, selection)
+      continue
+    }
     const context = resolveCapabilityContextForModelKey(modelMap, modelKey)
     if (!context) continue
     const fixedFields = new Set(getFixedParameterFields(context.modelType, context.capabilities).map(({ field }) => field))
@@ -113,8 +145,12 @@ export function validateCapabilitySelectionsAgainstModels(
       }
     }
   }
+  const catalogSelections: CapabilitySelections = {}
+  for (const [modelKey, selection] of Object.entries(selections)) {
+    if (!isOpenAiCompatModelKey(modelKey)) catalogSelections[modelKey] = selection
+  }
   const issues = validateCapabilitySelectionsPayload(
-    selections,
+    catalogSelections,
     (modelKey) => resolveCapabilityContextForModelKey(modelMap, modelKey),
   )
 

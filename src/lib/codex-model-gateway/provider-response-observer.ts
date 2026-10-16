@@ -43,8 +43,9 @@ function readSseData(block: string): unknown {
 function providerFailure(
   source: unknown,
   phase: 'result' | 'stream',
+  providerKey: string,
 ): FailureRecord {
-  const failure = resolveAiProviderAdapter('openrouter').failure.normalize({
+  const failure = resolveAiProviderAdapter(providerKey).failure.normalize({
     error: source,
     phase,
   })
@@ -99,6 +100,7 @@ export async function observeCodexProviderSuccessResponse(input: {
   readonly response: Response
   readonly attempt: CodexProviderAttemptIdentity
   readonly requestSignal: AbortSignal
+  readonly providerKey?: string
   readonly providerRequestId: string | null
   readonly headerGenerationId: string | null
   readonly projectId?: string
@@ -107,6 +109,7 @@ export async function observeCodexProviderSuccessResponse(input: {
   readonly modelKey?: string
   readonly responseStartedAt?: number
 }): Promise<Response> {
+  const providerKey = input.providerKey ?? 'openrouter'
   const turnId = input.turnId ?? input.attempt.turnId
   const modelKey = input.modelKey ?? input.attempt.modelKey
   const responseStartedAt = input.responseStartedAt ?? Date.now()
@@ -116,12 +119,12 @@ export async function observeCodexProviderSuccessResponse(input: {
     try {
       payload = await readProviderJsonResponse({
         response: input.response,
-        provider: 'openrouter',
+        provider: providerKey,
         phase: 'result',
       })
     } catch (error: unknown) {
       await failCodexProviderAttempt(input.attempt, {
-        failure: providerFailure(error, 'result'),
+        failure: providerFailure(error, 'result', providerKey),
         providerStatus: input.response.status,
         providerRequestId: input.providerRequestId,
         providerGenerationId: input.headerGenerationId,
@@ -149,7 +152,7 @@ export async function observeCodexProviderSuccessResponse(input: {
       payload,
     })
     await failCodexProviderAttempt(input.attempt, {
-      failure: providerFailure(source, 'result'),
+      failure: providerFailure(source, 'result', providerKey),
       providerStatus: input.response.status,
       providerRequestId: input.providerRequestId,
       providerGenerationId: generationId,
@@ -163,7 +166,7 @@ export async function observeCodexProviderSuccessResponse(input: {
   if (!input.response.body) {
     const source = streamDisconnectedSource()
     await failCodexProviderAttempt(input.attempt, {
-      failure: providerFailure(source, 'stream'),
+      failure: providerFailure(source, 'stream', providerKey),
       providerStatus: input.response.status,
       providerRequestId: input.providerRequestId,
       providerGenerationId: input.headerGenerationId,
@@ -205,7 +208,7 @@ export async function observeCodexProviderSuccessResponse(input: {
       const source = streamFailureSource(payload)
       settlementStarted = true
       await failCodexProviderAttempt(input.attempt, {
-        failure: providerFailure(source, 'stream'),
+        failure: providerFailure(source, 'stream', providerKey),
         providerStatus: input.response.status,
         providerRequestId: input.providerRequestId,
         providerGenerationId: responseIdentity(payload, input.headerGenerationId),
@@ -274,7 +277,7 @@ export async function observeCodexProviderSuccessResponse(input: {
             const source = streamDisconnectedSource()
             settlementStarted = true
             await failCodexProviderAttempt(input.attempt, {
-              failure: providerFailure(source, 'stream'),
+              failure: providerFailure(source, 'stream', providerKey),
               providerStatus: input.response.status,
               providerRequestId: input.providerRequestId,
               providerGenerationId: input.headerGenerationId,
@@ -300,7 +303,7 @@ export async function observeCodexProviderSuccessResponse(input: {
           }
           settlementStarted = true
           await failCodexProviderAttempt(input.attempt, {
-            failure: providerFailure(source, 'stream'),
+            failure: providerFailure(source, 'stream', providerKey),
             providerStatus: input.response.status,
             providerRequestId: input.providerRequestId,
             providerGenerationId: input.headerGenerationId,
@@ -328,7 +331,7 @@ export async function observeCodexProviderSuccessResponse(input: {
           } else {
             const source = streamDisconnectedSource(error)
             await failCodexProviderAttempt(input.attempt, {
-              failure: providerFailure(source, 'stream'),
+              failure: providerFailure(source, 'stream', providerKey),
               providerStatus: input.response.status,
               providerRequestId: input.providerRequestId,
               providerGenerationId: input.headerGenerationId,

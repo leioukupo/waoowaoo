@@ -5,10 +5,12 @@ import {
 import { ensureAiCatalogsRegistered } from '@/lib/ai-exec/catalog-bootstrap'
 import { isPlatformProviderCredentialMode } from '@/lib/deployment/config'
 import {
+  isReasoningEffort,
   parseReasoningEffort,
   type ReasoningEffort,
 } from '@/lib/ai-registry/reasoning-effort'
 import { resolveBuiltinCapabilitiesByModelKey } from '@/lib/ai-registry/capabilities-catalog'
+import { getProviderKey } from '@/lib/ai-registry/selection'
 
 /**
  * `utility` covers short mechanical LLM work that is not the Primary Agent and
@@ -43,7 +45,19 @@ export async function resolveReasoningEffort(input: {
   ensureAiCatalogsRegistered()
 
   const capabilities = resolveBuiltinCapabilitiesByModelKey('llm', input.modelKey)?.llm
-  if (!capabilities) throw new Error(`LLM_CAPABILITIES_REQUIRED:${input.modelKey}`)
+  if (!capabilities) {
+    // User-defined OpenAI-compatible channels declare no builtin capability
+    // catalog entry by design. Most of them (DeepSeek and similar) accept the
+    // standard reasoning parameter, so send a conservative effort instead of
+    // dropping the parameter; the user can pin a specific level in the API
+    // config page, which takes precedence over the fallback.
+    if (getProviderKey(input.modelKey).toLowerCase() === 'openai-compat') {
+      const config = await getUserModelConfig(input.userId)
+      const saved = config.capabilityDefaults[input.modelKey]?.reasoningEffort
+      return isReasoningEffort(saved) ? saved : 'low'
+    }
+    throw new Error(`LLM_CAPABILITIES_REQUIRED:${input.modelKey}`)
+  }
   if (!capabilities.reasoningEffortOptions?.length) return 'none'
   const modelDefault = parseReasoningEffort(
     capabilities.defaultReasoningEffort,

@@ -12,6 +12,7 @@ const STAGE_LABELS: Record<string, string> = {
   received: 'progress.stage.received',
   workspace_resource_prepare: 'progress.stage.workspaceResourcePrepare',
   workspace_resource_generate: 'progress.stage.workspaceResourceGenerate',
+  workspace_resource_prompt_skill: 'progress.stage.workspaceResourcePromptSkill',
   workspace_resource_persist: 'progress.stage.workspaceResourcePersist',
   generate_voice_submit: 'progress.stage.generateVoiceSubmit',
   persist_voice: 'progress.stage.persistVoice',

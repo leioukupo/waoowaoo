@@ -89,12 +89,12 @@ function readNestedProviderError(value: unknown): Record<string, unknown> | null
   }
 }
 
-async function readProviderErrorMetadata(response: Response): Promise<ProviderErrorMetadata> {
+async function readProviderErrorMetadata(response: Response, providerKey: string): Promise<ProviderErrorMetadata> {
   let parsed: unknown
   try {
     parsed = await readProviderJsonResponse({
       response,
-      provider: 'openrouter',
+      provider: providerKey,
       phase: 'submit',
       maxBytes: CODEX_PROVIDER_ERROR_MAX_BYTES,
     })
@@ -132,7 +132,7 @@ async function readProviderErrorMetadata(response: Response): Promise<ProviderEr
     ?? boundedProviderErrorMessage(error?.message)
     ?? boundedProviderErrorMessage(root?.message)
   const source = new ProviderHttpError({
-    provider: 'openrouter',
+    provider: providerKey,
     phase: 'submit',
     statusCode: response.status,
     requestId: response.headers.get('x-request-id')?.trim()
@@ -173,8 +173,8 @@ function capturedFailure(input: {
   readonly metadata: ProviderErrorMetadata
   readonly kind: CodexProviderFailureKind
   readonly providerStatus: number
-}): FailureRecord {
-  const normalized = resolveAiProviderAdapter('openrouter').failure.normalize({
+}, providerKey: string): FailureRecord {
+  const normalized = resolveAiProviderAdapter(providerKey).failure.normalize({
     error: input.metadata.source,
     phase: 'submit',
     operation: EXTERNAL_OPERATION.PROVIDER_SUBMIT,
@@ -195,6 +195,7 @@ function capturedFailure(input: {
 
 function failedProjection(input: Omit<CodexProviderResponseProjection, 'failure'> & {
   readonly metadata: ProviderErrorMetadata
+  readonly providerKey: string
 }): CodexProviderResponseProjection {
   if (!input.failureKind) throw new Error('CODEX_PROVIDER_FAILURE_KIND_REQUIRED')
   return {
@@ -203,11 +204,14 @@ function failedProjection(input: Omit<CodexProviderResponseProjection, 'failure'
     providerStatus: input.providerStatus,
     providerCode: input.providerCode,
     providerErrorType: input.providerErrorType,
-    failure: capturedFailure({
-      metadata: input.metadata,
-      kind: input.failureKind,
-      providerStatus: input.providerStatus,
-    }),
+    failure: capturedFailure(
+      {
+        metadata: input.metadata,
+        kind: input.failureKind,
+        providerStatus: input.providerStatus,
+      },
+      input.providerKey,
+    ),
   }
 }
 
@@ -317,6 +321,7 @@ const PROVIDER_OVERLOAD_ERROR_TOKENS = new Set([
  */
 export async function projectCodexProviderResponse(
   response: Response,
+  providerKey: string = 'openrouter',
 ): Promise<CodexProviderResponseProjection> {
   const providerStatus = response.status
   if (response.ok) {
@@ -330,7 +335,7 @@ export async function projectCodexProviderResponse(
     }
   }
 
-  const metadata = await readProviderErrorMetadata(response)
+  const metadata = await readProviderErrorMetadata(response, providerKey)
   const providerCode = metadata.providerCode ?? metadata.code ?? metadata.type
   const providerErrorType = metadata.errorType
   if (
@@ -350,6 +355,7 @@ export async function projectCodexProviderResponse(
       providerCode,
       providerErrorType,
       metadata,
+      providerKey,
     })
   }
   if (hasProviderErrorToken(metadata, PROVIDER_POLICY_ERROR_TOKENS)) {
@@ -363,6 +369,7 @@ export async function projectCodexProviderResponse(
       providerCode,
       providerErrorType,
       metadata,
+      providerKey,
     })
   }
   if (hasProviderErrorToken(metadata, PROVIDER_CONTEXT_ERROR_TOKENS)) {
@@ -376,6 +383,7 @@ export async function projectCodexProviderResponse(
       providerCode,
       providerErrorType,
       metadata,
+      providerKey,
     })
   }
   if (providerStatus === 429) {
@@ -391,6 +399,7 @@ export async function projectCodexProviderResponse(
       providerCode,
       providerErrorType,
       metadata,
+      providerKey,
     })
   }
   if (hasProviderErrorToken(metadata, PROVIDER_OVERLOAD_ERROR_TOKENS)) {
@@ -407,6 +416,7 @@ export async function projectCodexProviderResponse(
       providerCode,
       providerErrorType,
       metadata,
+      providerKey,
     })
   }
   if (providerStatus === 401 || providerStatus === 403 || providerStatus === 404) {
@@ -423,6 +433,7 @@ export async function projectCodexProviderResponse(
       providerCode,
       providerErrorType,
       metadata,
+      providerKey,
     })
   }
   if (providerStatus >= 400 && providerStatus < 500) {
@@ -439,6 +450,7 @@ export async function projectCodexProviderResponse(
       providerCode,
       providerErrorType,
       metadata,
+      providerKey,
     })
   }
   if (providerStatus >= 500) {
@@ -455,6 +467,7 @@ export async function projectCodexProviderResponse(
       providerCode,
       providerErrorType,
       metadata,
+      providerKey,
     })
   }
   return failedProjection({
@@ -470,5 +483,6 @@ export async function projectCodexProviderResponse(
     providerCode,
     providerErrorType,
     metadata,
+    providerKey,
   })
 }

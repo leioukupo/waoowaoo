@@ -468,6 +468,26 @@ services:
     deploy:
       replicas: ${TEMPORAL_WORKER_GREEN_REPLICAS:-0}
 
+
+  # Local mirror of the ffmpeg-ffprobe-static release binaries (~260MB) for
+  # image builds on networks where GitHub is unreachable. The Dockerfile's
+  # npm step honors FFMPEG_FFPROBE_STATIC_BASE_URL (.env); set it to the
+  # mirror's fixed address http://172.30.0.8:8471. A container name would
+  # not work: buildkit runs RUN steps in exec containers whose DNS is the
+  # image's baked-in resolv.conf, so only the fixed numeric address can
+  # route across to this container (via the fixed-subnet network below).
+  ffmpeg-mirror:
+    image: node:22-bookworm-slim
+    restart: unless-stopped
+    logging: *default-logging
+    command: ["node", "/server.mjs"]
+    networks:
+      ffmpeg-mirror-net:
+        ipv4_address: 172.30.0.8
+    volumes:
+      - ./.ffmpeg-mirror-server/server.mjs:/server.mjs:ro
+      - ./.ffmpeg-mirror:/srv:ro
+
 volumes:
   mysql_data:
   redis_data:
@@ -477,3 +497,13 @@ networks:
   codex-runtime:
     name: "${COMPOSE_PROJECT_NAME:-waoowaoo}_codex-runtime"
     internal: true
+  # Fixed subnet + fixed container IP (172.30.0.8): the buildkit exec
+  # containers resolve DNS from the image's baked-in resolv.conf, so the
+  # image build can only reach the mirror by a stable numeric address.
+  # If 172.30.0.0/16 collides with another docker network on a machine,
+  # change the subnet here and the matching FFMPEG_FFPROBE_STATIC_BASE_URL in .env.
+  ffmpeg-mirror-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/16

@@ -20,6 +20,15 @@ services:
       context: .
       dockerfile: Dockerfile
       target: runner
+      # ffmpeg-ffprobe-static's install script normally downloads ~260MB of
+      # binaries from GitHub, which stalls on this LAN. .env points it at the
+      # compose ffmpeg-mirror service by its fixed address (172.30.0.8:8471);
+      # a container name cannot be resolved from buildkit's exec containers
+      # (image-baked resolv.conf). The build must run through a builder on
+      # the mirror's network (scripts/setup-buildx-mirror-builder.sh).
+      # Leave the variable empty on networks that reach GitHub directly.
+      args:
+        FFMPEG_FFPROBE_STATIC_BASE_URL: ${FFMPEG_FFPROBE_STATIC_BASE_URL:-}
     depends_on: !reset []
     command: ["npm", "run", "start:next"]
     environment:
@@ -35,6 +44,38 @@ services:
         source: "${CODEX_RUNTIME_HOST_ROOT:-/var/lib/wao/codex-runtime}"
         target: "${CODEX_RUNTIME_HOST_ROOT:-/var/lib/wao/codex-runtime}"
 
+  # Temporal worker for web-only deployments. Infrastructure (Temporal, Redis,
+  # MySQL, object storage) lives outside this Compose project, so the worker
+  # runs on the host network and reads the encrypted runtime config from the
+  # shared ./data directory, exactly like the Web container. The Docker
+  # socket is mounted for the same reason the Web container gets it.
+  #
+  # TEMPORAL_WORKER_BUILD_ID (in .env) is the worker version. It must change
+  # whenever waoowaoo-web:local is rebuilt; scripts/worker-redeploy.sh updates
+  # .env, promotes the new build as the deployment's current version, and
+  # recreates this container in one step.
+  worker:
+    image: waoowaoo-web:local
+    restart: unless-stopped
+    network_mode: host
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    environment:
+      WAO_DATA_DIR: /app/data
+      TEMPORAL_WORKER_DEPLOYMENT_NAME: waoowaoo
+      TEMPORAL_WORKER_BUILD_ID: ${TEMPORAL_WORKER_BUILD_ID:?Set TEMPORAL_WORKER_BUILD_ID in .env after every image rebuild (scripts/worker-redeploy.sh does this automatically)}
+      # Kept in sync with the Web container so an on-demand Codex runtime
+      # rebuild inside the worker does not stall on deb.debian.org.
+      CODEX_APT_MIRROR: ${CODEX_APT_MIRROR:-}
+    volumes:
+      - ./data:/app/data
+      - ./docker-logs:/app/logs
+      - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock
+    command: ["npm", "run", "start:temporal-worker"]
+
   # Keep infrastructure available as an explicit opt-in profile for operators
   # who use the same Compose files for local bootstrap. It is excluded from a
   # plain `docker compose ... up` in web-only mode.
@@ -48,11 +89,56 @@ services:
     profiles: ["infra"]
   temporal-schema:
     profiles: ["infra"]
-  temporal-config:
-    profiles: ["infra"]
-  temporal:
-    profiles: ["infra"]
   temporal-create-namespace:
     profiles: ["infra"]
+  # temporal-config 归入 temporal-in-compose profile（与 temporal 同启/同停）：
+  # 它只是往 temporal_config 命名卷写一个 2 行 docker.yaml(limit.maxIDLength)，
+  # 幂等且瞬时。默认 2 容器路径不启动；开启 profile 后才与 temporal 一起起来。
+  temporal-config:
+    profiles: ["temporal-in-compose"]
   temporal-verify-worker-version:
     profiles: ["infra"]
+
+  # 可选（profile: temporal-in-compose）：让 compose 直接托管 Temporal 服务器，
+  # 适用于 Temporal 使用外部存储(1Panel Postgres 主存储 + 独立 ES 可见性)的场景。
+  # 连接参数从 .env 读取（TEMPORAL_PG_SEEDS / TEMPORAL_PG_USER / TEMPORAL_PG_PWD /
+  # TEMPORAL_ES_SEEDS），端口 0.0.0.0:7233 与独立容器一致。默认 2 容器路径不启动
+  # 本服务——那时 Temporal 仍由 /setup 页配置的外部服务提供。
+  temporal:
+    profiles: ["temporal-in-compose"]
+    # 清除基础服务对 infra one-shot 的依赖，否则 temporal-schema 被 profile
+    # 过滤会报 "depends on undefined service"。与 temporal-config 同 profile 一起
+    # 启动；即便 temporal 抢跑，restart: unless-stopped 也会自愈。
+    depends_on: !reset
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_SEEDS: ${TEMPORAL_PG_SEEDS:-127.0.0.1}
+      POSTGRES_USER: ${TEMPORAL_PG_USER:-}
+      POSTGRES_PWD: ${TEMPORAL_PG_PWD:-}
+      ENABLE_ES: "true"
+      ES_VERSION: "v7"
+      ES_SEEDS: ${TEMPORAL_ES_SEEDS:-127.0.0.1}
+    # 端口沿用基础服务的 ${INFRA_BIND_ADDRESS}:${TEMPORAL_HOST_PORT}:7233，
+    # 由 .env 设为 0.0.0.0:7233（对外可访问，与独立容器一致）。
+    # 动态配置用服务器内嵌默认值（原 dev-sql 仅 maxIDLength 与一个 dev 缓存开关，
+    # 复用既有数据用不上），故不挂自定义目录、不设 DYNAMIC_CONFIG_FILE_PATH。
+    # 主存储(1Panel Postgres, 172.18.0.4)与可见性 ES(172.28.0.3)分属两个外部
+    # 网络，waoowaoo_default 路由不到它们，故 temporal 额外挂上这两个网络；
+    # app/worker 通过发布端口 192.168.31.9:7233 访问 Temporal，不依赖服务名。
+    networks:
+      - 1panel-network
+      - temporal-network
+
+  # UI 依赖的 one-shot 属于 infra profile，这里解除依赖；
+  # 需要 UI 时用 --profile temporal-ui 启动（127.0.0.1:18080）。
+  temporal-ui:
+    depends_on: !reset
+
+# 外部网络：Temporal 主存储(1Panel Postgres)与可见性 Elasticsearch 所在网络，
+# 由 1Panel / 既有 Temporal 栈创建，这里仅以 external 方式引用（不创建/不管理）。
+networks:
+  1panel-network:
+    external: true
+  temporal-network:
+    external: true

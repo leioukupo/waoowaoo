@@ -17,6 +17,12 @@ import { SEEDANCE_2_RETAIL_CREDITS_PER_SECOND } from '@/lib/ai-providers/shared/
 import { usdToCredits } from '@/lib/ai-registry/pricing-currency'
 import type { ReasoningEffort } from '@/lib/ai-registry/reasoning-effort'
 import {
+  OPENROUTER_STANDARD_IMAGE_ASPECT_RATIOS,
+  OPENROUTER_STANDARD_IMAGE_DEFAULT_RESOLUTION,
+  OPENROUTER_STANDARD_IMAGE_MAX_REFERENCE_IMAGES,
+  OPENROUTER_STANDARD_IMAGE_RESOLUTIONS,
+} from '@/lib/ai-registry/openrouter-standard-capabilities'
+import {
   OPENROUTER_SEEDREAM_5_PRO_MODEL_ID,
   OPENROUTER_SEEDREAM_5_PRO_RESOLUTIONS,
   OPENROUTER_SEEDREAM_5_PRO_RATIOS,
@@ -26,7 +32,9 @@ import {
   OPENROUTER_SEEDANCE_2_VIDEO_MODEL_ID,
   OPENROUTER_SEEDANCE_2_FAST_VIDEO_MODEL_ID,
   OPENROUTER_VIDEO_MODELS,
+  buildOpenRouterStandardVideoOptionSchema,
   buildOpenRouterVideoOptionSchema,
+  tryResolveOpenRouterVideoModel,
 } from './video-models'
 import { OPENROUTER_HAILUO_PRICING_CATALOG_ENTRIES, OPENROUTER_SEEDANCE_2_5_PRICING } from './video-pricing'
 
@@ -71,13 +79,6 @@ const OPENROUTER_IMAGE_REFERENCE_LIMITS: Readonly<Record<string, number>> = {
   [OPENROUTER_BANANA_2_LITE_IMAGE_MODEL_ID]: 14,
 }
 
-export const OPENROUTER_IMAGE_MODEL_IDS = new Set([
-  OPENROUTER_SEEDREAM_5_PRO_MODEL_ID,
-  OPENROUTER_GPT_IMAGE_2_MODEL_ID,
-  OPENROUTER_BANANA_PRO_IMAGE_MODEL_ID,
-  OPENROUTER_BANANA_2_IMAGE_MODEL_ID,
-  OPENROUTER_BANANA_2_LITE_IMAGE_MODEL_ID,
-])
 
 export const OPENROUTER_GPT_5_6_REASONING_EFFORT_OPTIONS = [
   'medium',
@@ -602,7 +603,33 @@ export function resolveOpenRouterOptionSchema(modality: MediaModality, modelId?:
               }
             : null
     if (!imagePolicy || !modelId) {
-      throw new Error(`OPENROUTER_OPTION_SCHEMA_UNSUPPORTED_IMAGE_MODEL:${modelId || '<missing>'}`)
+      // Models outside the curated OpenRouter image list still use the
+      // standard OpenRouter image wire: normalized resolution tier, aspect
+      // ratio and reference assets. Defaults keep the request complete so
+      // OpenRouter-compatible endpoints never see undefined fields.
+      return buildMediaOptionSchema('image', {
+        allowedKeys: ['seed'],
+        excludedKeys: [
+          'keepOriginalAspectRatio',
+          'outputFormat',
+          'quality',
+          'responseFormat',
+          'size',
+        ],
+        required: ['aspectRatio'],
+        validators: {
+          aspectRatio: enumValidator(OPENROUTER_STANDARD_IMAGE_ASPECT_RATIOS),
+          resolution: enumValidator(OPENROUTER_STANDARD_IMAGE_RESOLUTIONS),
+          referenceImages: stringArrayValidator({ maxLength: OPENROUTER_STANDARD_IMAGE_MAX_REFERENCE_IMAGES }),
+          seed: integerRangeValidator({}),
+        },
+        normalize: (options: AiReadonlyUnknownObject): AiUnknownObject => ({
+          ...options,
+          aspectRatio: options.aspectRatio,
+          resolution: options.resolution ?? OPENROUTER_STANDARD_IMAGE_DEFAULT_RESOLUTION,
+          referenceImages: options.referenceImages ?? [],
+        }),
+      })
     }
     return buildMediaOptionSchema('image', {
       excludedKeys: [
@@ -627,6 +654,10 @@ export function resolveOpenRouterOptionSchema(modality: MediaModality, modelId?:
       }),
     })
   }
-  if (modality === 'video') return buildOpenRouterVideoOptionSchema(modelId)
+  if (modality === 'video') {
+    return tryResolveOpenRouterVideoModel(modelId)
+      ? buildOpenRouterVideoOptionSchema(modelId)
+      : buildOpenRouterStandardVideoOptionSchema()
+  }
   return buildMediaOptionSchema(modality)
 }

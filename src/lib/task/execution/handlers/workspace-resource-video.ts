@@ -11,6 +11,10 @@ import {
   resolveVideoSourceFromGeneration,
   uploadVideoSourceToStorage,
 } from '../provider-media'
+import {
+  isH3VideoModel,
+  rewriteVideoPromptWithH3Skill,
+} from '@/lib/video-generation/h3-prompt-skill'
 
 function frozenVideoOptions(
   value: WorkspaceResourceGenerationTaskPayload['generationOptions'],
@@ -122,6 +126,22 @@ export async function handleWorkspaceResourceVideoTask(
   if (!durationSeconds) {
     throw new Error(`WORKSPACE_RESOURCE_VIDEO_DURATION_REQUIRED:${data.taskId}`)
   }
+  // 提交前用 MiniMax H3 提示词 skill 重写提示词（仅 H3 视频模型；失败时回退原文）
+  const skillModel = isH3VideoModel(payload.resource.modelKey)
+  if (skillModel) {
+    await reportTaskProgress(context, 30, { stage: 'workspace_resource_prompt_skill' })
+  }
+  const skillRewrite = await rewriteVideoPromptWithH3Skill({
+    userId: data.userId,
+    projectId: data.projectId,
+    modelKey: payload.resource.modelKey,
+    rawPrompt: prompt,
+    durationSeconds,
+    referenceImages,
+    referenceAudios,
+    referenceVideos,
+  })
+  const submissionPrompt = skillRewrite?.prompt ?? prompt
   await reportTaskProgress(context, 45, { stage: 'workspace_resource_generate' })
   const generated = await resolveVideoSourceFromGeneration(context, {
     userId: data.userId,
@@ -131,7 +151,7 @@ export async function handleWorkspaceResourceVideoTask(
     referenceVideos,
     options: {
       ...frozenVideoOptions(options),
-      prompt,
+      prompt: submissionPrompt,
       duration: durationSeconds,
     },
   })

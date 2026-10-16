@@ -24,6 +24,19 @@ import {
   failCodexProviderAttempt,
 } from './provider-attempt'
 import { observeCodexProviderSuccessResponse } from './provider-response-observer'
+import {
+  ADAPTIVE_STRIP_PARAMS,
+  createResponsesBridgeFromChatResponse,
+  markChatParamIncompatible,
+  translateResponsesToChatRequest,
+} from './chat-bridge'
+import { forgetWireProbe } from './wire-probe'
+import {
+  markResponsesAdjustments,
+  normalizeResponsesRequestCompat,
+  parseResponsesAdjustments,
+} from './responses-compat'
+import { isOpenAiCompatibleProvider } from './selection'
 
 const CODEX_MODEL_REQUEST_MAX_BYTES = 16 * 1024 * 1024
 
@@ -243,6 +256,7 @@ function normalizeAndValidateBody(params: {
   readonly upstreamModelId: string
 }): {
   readonly body: Buffer
+  readonly parsed: Record<string, unknown>
   readonly diagnostics: ProviderRequestDiagnostics
 } {
   const { parsed } = params
@@ -254,6 +268,7 @@ function normalizeAndValidateBody(params: {
   const normalizedBody = Buffer.from(JSON.stringify(parsed), 'utf8')
   return {
     body: normalizedBody,
+    parsed,
     diagnostics: {
       bodyBytes: normalizedBody.byteLength,
       inputItems: Array.isArray(parsed.input) ? parsed.input.length : 0,
@@ -368,7 +383,22 @@ export async function proxyCodexResponsesRequest(params: {
     runtimeModelId: upstream.runtimeModelId,
     upstreamModelId: upstream.modelId,
   })
-  const { body } = providerRequest
+  let body = providerRequest.body
+  const parsed: Record<string, unknown> = providerRequest.parsed
+  // Providers whose /responses implementation deviates from the OpenAI API
+  // surface (OpenAI-compatible channels, e.g. DeepSeek native) get a
+  // deterministic pre-normalization; other providers only get the
+  // adjustments they previously proved through an error.
+  const compatChanges: string[] = []
+  normalizeResponsesRequestCompat({
+    parsed,
+    baseUrl: upstream.providerBaseUrl,
+    proactive: isOpenAiCompatibleProvider(upstream.providerKey),
+    changes: compatChanges,
+  })
+  if (compatChanges.length > 0) {
+    body = Buffer.from(JSON.stringify(parsed), 'utf8')
+  }
   const requestedAccept = params.request.headers.get('accept')?.toLowerCase()
     || ''
   const accept = requestedAccept.includes('text/event-stream')
@@ -379,7 +409,7 @@ export async function proxyCodexResponsesRequest(params: {
     userId: scope.userId,
     turnId: activeTurn.turnId,
     runtimeAttempt: activeTurn.attempt,
-    providerKey: 'openrouter',
+    providerKey: upstream.providerKey,
     modelKey: upstream.modelKey,
     requestHash: createHash('sha256')
       .update(body)
@@ -398,79 +428,161 @@ export async function proxyCodexResponsesRequest(params: {
       providerAttemptId: providerAttempt.id,
       modelKey: upstream.modelKey,
       accept,
+      ...(compatChanges.length > 0 ? { compatChanges } : {}),
       ...providerRequest.diagnostics,
     },
   })
 
-  let response: Response
-  try {
-    response = await fetchWithProviderProxy(upstream.responsesEndpoint, {
-      method: 'POST',
-      headers: {
-        Accept: accept,
-        Authorization: `Bearer ${upstream.providerApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: new Uint8Array(body),
-      redirect: 'error',
-      signal: params.request.signal,
+  if (upstream.wire === 'chat' && upstream.chatEndpoint) {
+    return await executeCodexChatBridgeRequest({
+      request: params.request,
+      scope,
+      activeTurn,
+      providerAttempt,
+      upstream,
+      parsed,
+      providerRequestStartedAt,
     })
-  } catch (error: unknown) {
-    if (params.request.signal.aborted) {
-      await cancelCodexProviderAttempt(providerAttempt)
-      params.request.signal.throwIfAborted()
+  }
+
+  const responsesEndpoint = upstream.responsesEndpoint
+  if (!responsesEndpoint) {
+    throw new CodexModelGatewayError('PROVIDER_BASE_URL_INVALID', 503)
+  }
+  let currentBody = body
+  let response: Response
+  let headerGenerationId: string | null = null
+  let providerRequestId: string | null = null
+  for (let compatRetry = 0; ; compatRetry += 1) {
+    try {
+      response = await fetchWithProviderProxy(responsesEndpoint, {
+        method: 'POST',
+        headers: {
+          Accept: accept,
+          Authorization: `Bearer ${upstream.providerApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: new Uint8Array(currentBody),
+        redirect: 'error',
+        signal: params.request.signal,
+      })
+    } catch (error: unknown) {
+      if (params.request.signal.aborted) {
+        await cancelCodexProviderAttempt(providerAttempt)
+        params.request.signal.throwIfAborted()
+      }
+      const sourceFailure = projectProviderCredentialOwnership(
+        resolveAiProviderAdapter(upstream.providerKey).failure.normalize({
+          error,
+          phase: 'submit',
+          operation: EXTERNAL_OPERATION.PROVIDER_SUBMIT,
+        }),
+        getDeploymentConfig().providerCredentialMode,
+      )
+      await failCodexProviderAttempt(providerAttempt, { failure: sourceFailure })
+      gatewayLogger.warn({
+        action: 'codex_gateway.provider_request_failed',
+        message: 'Codex model Provider request failed before receiving a response',
+        projectId: scope.projectId,
+        userId: scope.userId,
+        details: {
+          turnId: activeTurn.turnId,
+          modelKey: upstream.modelKey,
+        },
+      })
+      throw new CodexModelGatewayError(
+        'PROVIDER_REQUEST_FAILED',
+        500,
+        AppError.fromFailure(sourceFailure, error),
+      )
     }
-    const sourceFailure = projectProviderCredentialOwnership(
-      resolveAiProviderAdapter('openrouter').failure.normalize({
-        error,
-        phase: 'submit',
-        operation: EXTERNAL_OPERATION.PROVIDER_SUBMIT,
-      }),
-      getDeploymentConfig().providerCredentialMode,
-    )
-    await failCodexProviderAttempt(providerAttempt, { failure: sourceFailure })
-    gatewayLogger.warn({
-      action: 'codex_gateway.provider_request_failed',
-      message: 'Codex model Provider request failed before receiving a response',
+    headerGenerationId = response.headers.get('x-generation-id')
+    providerRequestId = readProviderRequestId(response)
+    gatewayLogger.info({
+      action: 'codex_gateway.provider_response_headers',
+      message: 'Codex model Provider response headers received',
       projectId: scope.projectId,
       userId: scope.userId,
       details: {
         turnId: activeTurn.turnId,
+        providerAttemptId: providerAttempt.id,
         modelKey: upstream.modelKey,
+        compatRetry,
+        elapsedMs: Date.now() - providerRequestStartedAt,
+        providerStatus: response.status,
+        providerRequestId,
+        providerGenerationId: headerGenerationId,
+        contentType: response.headers.get('content-type'),
+        contentEncoding: response.headers.get('content-encoding'),
+        contentLength: response.headers.get('content-length'),
       },
     })
-    throw new CodexModelGatewayError(
-      'PROVIDER_REQUEST_FAILED',
-      500,
-      AppError.fromFailure(sourceFailure, error),
-    )
+    if (!response.ok) {
+      // A 400/422 whose body names a rejected part of the request shape
+      // (custom tool, tool_choice variant, reasoning.summary variant,
+      // tools[i] variant) is answered by adjusting the body and retrying,
+      // mirroring the chat bridge's parameter stripping.
+      const rawText = (await response.text().catch(() => '')).slice(0, 16_384)
+      let retried = false
+      if (compatRetry < 2) {
+        const adjustments = parseResponsesAdjustments(rawText)
+        if (adjustments.length > 0) {
+          markResponsesAdjustments(upstream.providerBaseUrl, adjustments)
+          const retryChanges: string[] = []
+          normalizeResponsesRequestCompat({
+            parsed,
+            baseUrl: upstream.providerBaseUrl,
+            proactive: false,
+            changes: retryChanges,
+          })
+          if (retryChanges.length > 0) {
+            currentBody = Buffer.from(JSON.stringify(parsed), 'utf8')
+            gatewayLogger.info({
+              action: 'codex_gateway.responses_compat_retry',
+              message: 'Provider rejected the Responses request shape; retrying with the adjusted body',
+              projectId: scope.projectId,
+              userId: scope.userId,
+              details: {
+                turnId: activeTurn.turnId,
+                providerAttemptId: providerAttempt.id,
+                modelKey: upstream.modelKey,
+                providerStatus: response.status,
+                providerRequestId,
+                changes: retryChanges,
+              },
+            })
+            retried = true
+          }
+        }
+        if (retried) continue
+      }
+      if (!retried) {
+        const rebuiltHeaders = new Headers()
+        const contentType = response.headers.get('content-type')?.trim()
+        if (contentType) rebuiltHeaders.set('Content-Type', contentType)
+        const retryAfter = response.headers.get('retry-after')?.trim()
+        if (retryAfter) rebuiltHeaders.set('Retry-After', retryAfter)
+        rebuiltHeaders.set('Cache-Control', 'no-store')
+        response = new Response(rawText, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: rebuiltHeaders,
+        })
+      }
+    }
+    if (!response.ok) {
+      // No parseable adjustment (or retry budget exhausted): surface it.
+      break
+    }
+    // Success: stop retrying.
+    break
   }
-  const headerGenerationId = response.headers.get('x-generation-id')
-  const providerRequestId = readProviderRequestId(response)
-  gatewayLogger.info({
-    action: 'codex_gateway.provider_response_headers',
-    message: 'Codex model Provider response headers received',
-    projectId: scope.projectId,
-    userId: scope.userId,
-    details: {
-      turnId: activeTurn.turnId,
-      providerAttemptId: providerAttempt.id,
-      modelKey: upstream.modelKey,
-      elapsedMs: Date.now() - providerRequestStartedAt,
-      providerStatus: response.status,
-      providerRequestId,
-      providerGenerationId: headerGenerationId,
-      contentType: response.headers.get('content-type'),
-      contentEncoding: response.headers.get('content-encoding'),
-      contentLength: response.headers.get('content-length'),
-    },
-  })
   let projection: Awaited<ReturnType<typeof projectCodexProviderResponse>>
   try {
-    projection = await projectCodexProviderResponse(response)
+    projection = await projectCodexProviderResponse(response, upstream.providerKey)
   } catch (error: unknown) {
     const sourceFailure = projectProviderCredentialOwnership(
-      resolveAiProviderAdapter('openrouter').failure.normalize({
+      resolveAiProviderAdapter(upstream.providerKey).failure.normalize({
         error,
         phase: 'result',
         operation: EXTERNAL_OPERATION.PROVIDER_SUBMIT,
@@ -519,6 +631,7 @@ export async function proxyCodexResponsesRequest(params: {
     response: projection.response,
     attempt: providerAttempt,
     requestSignal: params.request.signal,
+    providerKey: upstream.providerKey,
     providerRequestId,
     headerGenerationId,
     projectId: scope.projectId,
@@ -527,6 +640,7 @@ export async function proxyCodexResponsesRequest(params: {
     modelKey: upstream.modelKey,
     responseStartedAt: providerRequestStartedAt,
   })
+  if (upstream.providerKey !== 'openrouter') return observedResponse
   return attachOpenRouterRealtimeBilling({
     response: observedResponse,
     headerGenerationId,
@@ -535,4 +649,247 @@ export async function proxyCodexResponsesRequest(params: {
     turnId: activeTurn.turnId,
     modelKey: upstream.modelKey,
   })
+}
+
+/**
+ * Chat Completions fallback for OpenAI-compatible providers without a
+ * Responses endpoint. The translated request is retried at most twice when
+ * the provider rejects an optional parameter (400 naming it); every other
+ * failure settles the provider attempt and surfaces Codex's error vocabulary.
+ */
+async function executeCodexChatBridgeRequest(params: {
+  readonly request: Request
+  readonly scope: CodexModelGatewayScope
+  readonly activeTurn: Awaited<ReturnType<typeof requireCodexModelGatewayModelActiveTurn>>
+  readonly providerAttempt: Awaited<ReturnType<typeof claimCodexProviderAttempt>>
+  readonly upstream: Awaited<ReturnType<typeof resolveCodexModelGatewayUpstream>>
+  readonly parsed: Record<string, unknown>
+  readonly providerRequestStartedAt: number
+}): Promise<Response> {
+  const { scope, activeTurn, providerAttempt, upstream } = params
+  const parsed = params.parsed
+  const buildChatBody = () => translateResponsesToChatRequest({
+    body: parsed,
+    modelId: upstream.modelId,
+    baseUrl: upstream.providerBaseUrl,
+  })
+
+  for (let loop = 0; ; loop += 1) {
+    let response: Response
+    try {
+      response = await fetchWithProviderProxy(upstream.chatEndpoint as string, {
+        method: 'POST',
+        headers: {
+          Accept: 'text/event-stream',
+          ...(upstream.providerApiKey
+            ? { Authorization: `Bearer ${upstream.providerApiKey}` }
+            : {}),
+          'Content-Type': 'application/json',
+        },
+        body: new TextEncoder().encode(buildChatBody()),
+        redirect: 'error',
+        signal: params.request.signal,
+      })
+    } catch (error: unknown) {
+      if (params.request.signal.aborted) {
+        await cancelCodexProviderAttempt(providerAttempt)
+        params.request.signal.throwIfAborted()
+      }
+      const sourceFailure = projectProviderCredentialOwnership(
+        resolveAiProviderAdapter(upstream.providerKey).failure.normalize({
+          error,
+          phase: 'submit',
+          operation: EXTERNAL_OPERATION.PROVIDER_SUBMIT,
+        }),
+        getDeploymentConfig().providerCredentialMode,
+      )
+      await failCodexProviderAttempt(providerAttempt, { failure: sourceFailure })
+      gatewayLogger.warn({
+        action: 'codex_gateway.chat_bridge_request_failed',
+        message: 'Codex chat-bridge request failed before receiving a response',
+        projectId: scope.projectId,
+        userId: scope.userId,
+        details: {
+          turnId: activeTurn.turnId,
+          providerAttemptId: providerAttempt.id,
+          modelKey: upstream.modelKey,
+          chatEndpoint: upstream.chatEndpoint,
+        },
+      })
+      throw new CodexModelGatewayError(
+        'PROVIDER_REQUEST_FAILED',
+        500,
+        AppError.fromFailure(sourceFailure, error),
+      )
+    }
+
+    const providerRequestId = readProviderRequestId(response)
+    const headerGenerationId = response.headers.get('x-generation-id')
+    gatewayLogger.info({
+      action: 'codex_gateway.chat_bridge_response_headers',
+      message: 'Codex chat-bridge Provider response received',
+      projectId: scope.projectId,
+      userId: scope.userId,
+      details: {
+        turnId: activeTurn.turnId,
+        providerAttemptId: providerAttempt.id,
+        modelKey: upstream.modelKey,
+        chatEndpoint: upstream.chatEndpoint,
+        elapsedMs: Date.now() - params.providerRequestStartedAt,
+        providerStatus: response.status,
+        providerRequestId,
+      },
+    })
+    if (!response.ok) {
+      const errorText = (await response.text().catch(() => '')).slice(0, 4_096)
+      if (response.status === 404) {
+        // The Chat endpoint does not exist: the probe verdict was wrong or the
+        // base URL is misconfigured. Drop the cached verdict so the next
+        // request re-probes, and surface a configuration error.
+        forgetWireProbe(upstream.providerBaseUrl, upstream.modelId)
+        const sourceFailure = projectProviderCredentialOwnership(
+          resolveAiProviderAdapter(upstream.providerKey).failure.normalize({
+            error: {
+              name: 'ProviderEndpointMissing',
+              message: `Chat Completions endpoint not found: ${upstream.chatEndpoint}. ${errorText.slice(0, 512)}`.trim(),
+              statusCode: 404,
+            },
+            phase: 'submit',
+            operation: EXTERNAL_OPERATION.PROVIDER_SUBMIT,
+          }),
+          getDeploymentConfig().providerCredentialMode,
+        )
+        await failCodexProviderAttempt(providerAttempt, {
+          failure: sourceFailure,
+          providerStatus: 404,
+          providerRequestId,
+        })
+        gatewayLogger.warn({
+          action: 'codex_gateway.chat_bridge_endpoint_missing',
+          message: 'Codex chat-bridge endpoint not found; the base URL may be misconfigured',
+          projectId: scope.projectId,
+          userId: scope.userId,
+          details: {
+            turnId: activeTurn.turnId,
+            providerAttemptId: providerAttempt.id,
+            modelKey: upstream.modelKey,
+            chatEndpoint: upstream.chatEndpoint,
+            providerError: errorText.slice(0, 512),
+          },
+        })
+        throw new CodexModelGatewayError(
+          'PROVIDER_BASE_URL_INVALID',
+          503,
+          AppError.fromFailure(sourceFailure),
+        )
+      }
+      if (response.status === 400 && loop < 2) {
+        const rejectedParam = (ADAPTIVE_STRIP_PARAMS as readonly string[])
+          .find((param) => errorText.toLowerCase().includes(param))
+        if (rejectedParam) {
+          markChatParamIncompatible(upstream.providerBaseUrl, rejectedParam)
+          gatewayLogger.info({
+            action: 'codex_gateway.chat_bridge_param_stripped',
+            message: `Provider rejected the ${rejectedParam} parameter; retrying the chat request without it`,
+            projectId: scope.projectId,
+            userId: scope.userId,
+            details: {
+              turnId: activeTurn.turnId,
+              providerAttemptId: providerAttempt.id,
+              modelKey: upstream.modelKey,
+              chatEndpoint: upstream.chatEndpoint,
+              rejectedParam,
+            },
+          })
+          continue
+        }
+      }
+      const sourceFailure = projectProviderCredentialOwnership(
+        resolveAiProviderAdapter(upstream.providerKey).failure.normalize({
+          error: {
+            name: 'ProviderRequestRejected',
+            message: errorText.slice(0, 2_000)
+              || `Provider returned HTTP ${String(response.status)}`,
+            statusCode: response.status,
+          },
+          phase: 'submit',
+          operation: EXTERNAL_OPERATION.PROVIDER_SUBMIT,
+        }),
+        getDeploymentConfig().providerCredentialMode,
+      )
+      await failCodexProviderAttempt(providerAttempt, {
+        failure: sourceFailure,
+        providerStatus: response.status,
+        providerRequestId,
+        providerGenerationId: headerGenerationId,
+      })
+      gatewayLogger.warn({
+        action: 'codex_gateway.chat_bridge_request_rejected',
+        message: 'Codex chat-bridge request was rejected by the Provider',
+        projectId: scope.projectId,
+        userId: scope.userId,
+        details: {
+          turnId: activeTurn.turnId,
+          providerAttemptId: providerAttempt.id,
+          modelKey: upstream.modelKey,
+          chatEndpoint: upstream.chatEndpoint,
+          providerStatus: response.status,
+          providerError: errorText.slice(0, 512),
+        },
+      })
+      throw new CodexModelGatewayError(
+        'PROVIDER_REQUEST_FAILED',
+        500,
+        AppError.fromFailure(sourceFailure),
+      )
+    }
+
+    const bridge = createResponsesBridgeFromChatResponse(
+      {
+        response,
+        modelId: upstream.runtimeModelId,
+        instructions: typeof parsed.instructions === 'string'
+          ? parsed.instructions
+          : undefined,
+        tools: Array.isArray(parsed.tools) ? parsed.tools : undefined,
+        temperature: typeof parsed.temperature === 'number'
+          ? parsed.temperature
+          : undefined,
+        maxOutputTokens: typeof parsed.max_output_tokens === 'number'
+          ? parsed.max_output_tokens
+          : undefined,
+      },
+      params.request.signal,
+    )
+    const bridged = new Response(bridge.stream, {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    })
+    gatewayLogger.info({
+      action: 'codex_gateway.chat_bridge_stream_started',
+      message: 'Codex chat-bridge is translating the Provider stream into the Responses wire',
+      projectId: scope.projectId,
+      userId: scope.userId,
+      details: {
+        turnId: activeTurn.turnId,
+        providerAttemptId: providerAttempt.id,
+        modelKey: upstream.modelKey,
+        chatEndpoint: upstream.chatEndpoint,
+        providerRequestId,
+      },
+    })
+    return await observeCodexProviderSuccessResponse({
+      response: bridged,
+      attempt: providerAttempt,
+      requestSignal: params.request.signal,
+      providerKey: upstream.providerKey,
+      providerRequestId,
+      headerGenerationId,
+      projectId: scope.projectId,
+      userId: scope.userId,
+      turnId: activeTurn.turnId,
+      modelKey: upstream.modelKey,
+      responseStartedAt: params.providerRequestStartedAt,
+    })
+  }
 }

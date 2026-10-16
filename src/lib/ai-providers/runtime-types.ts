@@ -194,7 +194,7 @@ export type AiProviderLlmSessionContext = {
   explicitSessionId?: string
 }
 
-export type AiProviderConnectionTestStepName = 'models' | 'textGen' | 'imageGen' | 'musicGen' | 'credits'
+export type AiProviderConnectionTestStepName = 'models' | 'textGen' | 'imageGen' | 'musicGen' | 'credits' | 'wire'
 
 export type AiProviderConnectionTestMessageKey =
   | 'connectionTest.authInvalid'
@@ -204,8 +204,11 @@ export type AiProviderConnectionTestMessageKey =
   | 'connectionTest.providerError'
   | 'connectionTest.rateLimited'
   | 'connectionTest.skippedModelsFailure'
+  | 'connectionTest.responsesSupported'
   | 'connectionTest.skippedSpend'
+  | 'connectionTest.chatOnly'
   | 'connectionTest.textGenerationOk'
+  | 'connectionTest.wireUnknown'
   | 'connectionTest.timeout'
 
 export type AiProviderConnectionTestStep = {

@@ -1,3 +1,4 @@
+import { sha256Hex } from '@/lib/sha256-browser'
 const COMMAND_RECEIPT_STORAGE_PREFIX = 'workspace-assistant-command-receipt-v1'
 
 interface StoredWorkspaceAssistantCommandReceipt {
@@ -20,8 +21,14 @@ function canonicalize(value: unknown): unknown {
 }
 
 async function sha256(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+  // crypto.subtle is unavailable in non-secure contexts (plain-HTTP
+  // deployments); the pure-JS fallback produces identical digests.
+  const subtle = typeof crypto !== 'undefined' ? crypto.subtle : undefined
+  const digest =
+    subtle && typeof subtle.digest === 'function'
+      ? new Uint8Array(await subtle.digest('SHA-256', new TextEncoder().encode(value)))
+      : sha256Hex(value)
+  return [...digest].map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
 function storageKey(scopeKey: string): string {

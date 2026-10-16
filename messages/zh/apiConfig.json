@@ -10,7 +10,7 @@
       "resolution": "分辨率",
       "quality": "质量",
       "generateAudio": "生成音频",
-      "reasoningEffort": "Reasoning effort"
+      "reasoningEffort": "思考强度"
     },
     "quality": {
       "high": "高",
@@ -96,6 +96,9 @@
     "rateLimited": "供应商正在限制当前账户的请求，请稍后重试。",
     "skippedModelsFailure": "凭据检查未通过，已跳过此项。",
     "skippedSpend": "为避免产生费用，已跳过实际生成。",
+    "responsesSupported": "供应商支持 OpenAI Responses 协议，助理会话将直接使用。",
+    "chatOnly": "供应商仅支持 Chat Completions，助理会话将通过兼容桥接自动适配。",
+    "wireUnknown": "未能确认供应商协议类型，助理会话将按 Chat Completions 处理。",
     "textGenerationOk": "文本生成测试成功。",
     "timeout": "供应商响应超时，请稍后重试。"
   },
