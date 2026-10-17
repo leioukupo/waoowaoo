@@ -27,7 +27,7 @@ const apiConfigInputSchema = z.object({
   models: z.array(z.object({
     modelId: z.string().trim().min(1).describe('Provider model ID.'),
     name: z.string().trim().min(1).describe('User-visible model name.'),
-    type: z.enum(['llm', 'image', 'video', 'music'])
+    type: z.enum(['llm', 'image', 'video', 'music', 'voice'])
       .describe('The model modality implemented by this model.'),
     provider: z.string().trim().min(1).describe('Exact configured provider ID.'),
   }).strict()).optional(),
@@ -67,7 +67,7 @@ export function createUserApiConfigOperations(): ProjectAgentOperationRegistryDr
       intent: 'act',
       effects: {
         writes: true,
-        workspaceResourceImpact: 'none',
+        workspaceResourceImpact: 'workspace_resources',
         billable: false,
         destructive: false,
         overwrite: true,
@@ -77,7 +77,7 @@ export function createUserApiConfigOperations(): ProjectAgentOperationRegistryDr
       },
       confirmation: {
         required: true,
-        summary: '将覆盖更新用户 API 配置（可能影响后续调用与计费）。系统会在获得明确批准后执行同一份已审核请求。',
+        summary: '将覆盖更新用户 API 配置（可能影响后续调用与计费），已有场景的模型选择会自动同步为当前设置。系统会在获得明确批准后执行同一份已审核请求。',
       },
       inputSchema: apiConfigInputSchema,
       outputSchema: z.unknown(),

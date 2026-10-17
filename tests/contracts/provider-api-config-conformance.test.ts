@@ -26,7 +26,16 @@ describe('API config provider registry conformance', () => {
     const modelProviderIds = Array.from(new Set(
       listApiConfigCatalogModels().map((model) => model.provider),
     )).sort()
-    expect(modelProviderIds).toEqual([...catalogProviderIds].sort())
+    // 自定义渠道（如 openai-compat）刻意没有内置模型目录：模型 ID 由用户填写，
+    // 因此“目录模型 ↔ 目录渠道”的对应关系只约束有内置目录的渠道。
+    const catalogDrivenProviderIds = catalogProviders
+      .filter((provider) => {
+        const manifest = AI_PROVIDER_MANIFESTS.find((candidate) => candidate.providerKey === provider.id)
+        return (manifest?.catalogs.apiConfigModels.length ?? 0) > 0
+      })
+      .map((provider) => provider.id)
+      .sort()
+    expect(modelProviderIds).toEqual(catalogDrivenProviderIds)
     expect(AI_PROVIDER_MANIFESTS
       .filter((manifest) => manifest.apiConfig)
       .every((manifest) => Boolean(manifest.platformCredentials)))

@@ -11,7 +11,7 @@ export async function getUserApiConfig(userId: string) {
 export async function putUserApiConfig(
   userId: string,
   body: unknown,
-  client?: Pick<Prisma.TransactionClient, 'userPreference' | 'project'>,
+  client?: Pick<Prisma.TransactionClient, 'userPreference' | 'project' | 'workspaceResource'>,
 ) {
   return putUserApiConfigFromService(userId, body, client)
 }

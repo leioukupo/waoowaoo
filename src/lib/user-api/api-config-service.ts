@@ -57,6 +57,11 @@ import {
   hasStoredProviderCredential,
   assertSingleMediaModelSelections,
 } from './effective-config'
+import {
+  backfillWorkspaceResourceModels,
+  computeMediaModelBackfillTargets,
+  hasMediaModelBackfillTargets,
+} from './media-model-backfill'
 
 function defaultModelsFromPreference(pref: { assistantModel?: string | null } | null): DefaultModelsPayload {
   return { assistantModel: pref?.assistantModel || '' }
@@ -137,7 +142,7 @@ export async function getUserApiConfig(userId: string) {
 export async function putUserApiConfig(
   userId: string,
   body: unknown,
-  client: Pick<Prisma.TransactionClient, 'userPreference'> = prisma,
+  client: Pick<Prisma.TransactionClient, 'userPreference' | 'workspaceResource'> = prisma,
 ) {
   ensureAiCatalogsRegistered()
   assertUserProviderConfigurationAvailable()
@@ -278,6 +283,14 @@ export async function putUserApiConfig(
     update: updateData,
     create: { userId, ...updateData },
   })
+
+  if (normalizedModels !== undefined) {
+    const backfillTargets = computeMediaModelBackfillTargets(normalizedModels, nextProviders)
+    if (hasMediaModelBackfillTargets(backfillTargets)) {
+      const modelBackfill = await backfillWorkspaceResourceModels(userId, backfillTargets, client)
+      return { success: true, modelBackfill }
+    }
+  }
 
   return { success: true }
 }

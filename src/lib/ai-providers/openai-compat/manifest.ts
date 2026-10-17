@@ -10,6 +10,11 @@ export const openAiCompatProviderManifest = defineAiProviderManifest({
     modelTypes: ['llm'],
   },
   platformCredentials: { envPrefix: 'PLATFORM_OPENAI_COMPAT' },
+  // The OpenAI-compatible chat protocol carries image parts as image_url
+  // (remote URL or base64 data URL), so vision inputs bind to both transports.
+  mediaInputs: [
+    { modality: 'vision', transports: { image: ['public-https', 'inline-data-url'] } },
+  ],
   catalogs: {
     capabilities: [],
     pricing: [],
