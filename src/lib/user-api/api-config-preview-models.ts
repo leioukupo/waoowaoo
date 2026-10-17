@@ -110,9 +110,9 @@ async function fetchEndpoint(endpoint: string, apiKey: string): Promise<PreviewM
     })
   } catch (error) {
     if (error instanceof Error && error.name === 'TimeoutError') {
-      throw new ApiError('NETWORK_ERROR', { code: 'PREVIEW_MODELS_TIMEOUT', message: endpoint })
+      throw new ApiError('NETWORK_ERROR', { code: 'PREVIEW_MODELS_TIMEOUT', message: endpoint }, { cause: error })
     }
-    throw new ApiError('NETWORK_ERROR', { code: 'PREVIEW_MODELS_UNREACHABLE', message: endpoint })
+    throw new ApiError('NETWORK_ERROR', { code: 'PREVIEW_MODELS_UNREACHABLE', message: endpoint }, { cause: error })
   }
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) {
