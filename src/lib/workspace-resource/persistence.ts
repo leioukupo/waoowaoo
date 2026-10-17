@@ -329,6 +329,54 @@ export async function reserveWorkspaceResourceInTransaction(
   return { resourceId, workspacePath }
 }
 
+/**
+ * Replace the frozen model key of a user's generated resources with the
+ * currently selected slot model. Personal settings are the single model fact
+ * for existing scenes: saving them re-points every stored generation at the
+ * model now selected for that slot. Returns the changed projects (their
+ * canvas revision is advanced so open editors refetch).
+ */
+export async function backfillWorkspaceResourceModelKeysInTransaction(
+  tx: Prisma.TransactionClient,
+  input: {
+    readonly userId: string
+    readonly mediaType: WorkspaceResourceMediaType
+    readonly schemaId?: string
+    readonly modelKey: string
+  },
+): Promise<{ readonly projectId: string; readonly count: number }[]> {
+  const where: Prisma.WorkspaceResourceWhereInput = {
+    userId: input.userId,
+    resourceKind: 'file',
+    mediaType: input.mediaType,
+    ...(input.schemaId ? { schemaId: input.schemaId } : {}),
+    deletedAt: null,
+    AND: [
+      { modelKey: { not: null } },
+      { modelKey: { not: input.modelKey } },
+    ],
+  }
+  const affectedProjects = await tx.workspaceResource.findMany({
+    where,
+    select: { projectId: true },
+    distinct: ['projectId'],
+  })
+  const changed: { readonly projectId: string; readonly count: number }[] = []
+  for (const row of affectedProjects) {
+    const updated = await tx.workspaceResource.updateMany({
+      where: { ...where, projectId: row.projectId },
+      data: { modelKey: input.modelKey },
+    })
+    if (updated.count === 0) continue
+    changed.push({ projectId: row.projectId, count: updated.count })
+    await advanceWorkspaceResourceRevisionInTransaction(tx, {
+      projectId: row.projectId,
+      userId: input.userId,
+    })
+  }
+  return changed
+}
+
 export async function retryWorkspaceResourcesInTransaction(
   tx: Prisma.TransactionClient,
   input: {

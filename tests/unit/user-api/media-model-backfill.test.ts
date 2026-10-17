@@ -31,6 +31,24 @@ const providers = [
   provider({ id: 'elevenlabs' }),
 ]
 
+interface FakeCall {
+  where: Prisma.WorkspaceResourceWhereInput
+  data: Record<string, unknown>
+}
+
+function fakeClient(projectIds: string[]) {
+  const updateMany = vi.fn(async (_args: { where: Prisma.WorkspaceResourceWhereInput; data: Record<string, unknown> }) => ({
+    count: 1,
+  }))
+  const findMany = vi.fn(async () => projectIds.map((projectId) => ({ projectId })))
+  const projectUpdate = vi.fn(async (_args: { where: { id: string; userId: string }; data: Record<string, unknown>; select: Record<string, boolean> }) => ({ workspaceResourceRevision: 7 }))
+  const client = {
+    workspaceResource: { findMany, updateMany },
+    project: { update: projectUpdate },
+  }
+  return { client, updateMany, findMany, projectUpdate }
+}
+
 describe('computeMediaModelBackfillTargets', () => {
   it('selects the single model of every configured media slot', () => {
     const targets = computeMediaModelBackfillTargets([
@@ -82,8 +100,7 @@ describe('hasMediaModelBackfillTargets', () => {
 
 describe('backfillWorkspaceResourceModels', () => {
   it('replaces frozen model keys per slot, splitting audio resources by schema', async () => {
-    const updateMany = vi.fn(async (call: { where: Prisma.WorkspaceResourceWhereInput; data: unknown }) => ({ count: 1 }))
-    const client = { workspaceResource: { updateMany } } as unknown as Pick<Prisma.TransactionClient, 'workspaceResource'>
+    const { client, updateMany, projectUpdate } = fakeClient(['project-1', 'project-2'])
     const counts = await backfillWorkspaceResourceModels(
       'user-1',
       {
@@ -92,43 +109,87 @@ describe('backfillWorkspaceResourceModels', () => {
         music: 'fal::music/new',
         voice: 'elevenlabs::voice/new',
       },
-      client,
+      client as unknown as Prisma.TransactionClient,
     )
-    expect(counts).toEqual({ image: 1, video: 1, music: 1, voice: 1 })
-    expect(updateMany).toHaveBeenCalledTimes(4)
+    expect(counts).toEqual({ image: 2, video: 2, music: 2, voice: 2 })
+    expect(updateMany).toHaveBeenCalledTimes(8)
 
-    const calledWhere = updateMany.mock.calls.map((call) => call[0].where)
-    const imageWhere = calledWhere.find((where) => where.mediaType === 'image')
-    const videoWhere = calledWhere.find((where) => where.mediaType === 'video')
-    const audioWheres = calledWhere.filter((where) => where.mediaType === 'audio')
-    expect(imageWhere).toBeDefined()
-    expect(videoWhere).toBeDefined()
-    expect(audioWheres.map((where) => where.schemaId).sort()).toEqual(['project.bgm_audio', 'project.voice_reference'])
+    const calls: FakeCall[] = updateMany.mock.calls.map((call) => call[0])
+    const imageCalls = calls.filter((call) => call.where.mediaType === 'image')
+    const videoCalls = calls.filter((call) => call.where.mediaType === 'video')
+    const audioCalls = calls.filter((call) => call.where.mediaType === 'audio')
+    expect(imageCalls.map((call) => call.where.schemaId).sort()).toEqual([undefined, undefined])
+    expect(videoCalls).toHaveLength(2)
+    expect(audioCalls.map((call) => call.where.schemaId).sort())
+      .toEqual(['project.bgm_audio', 'project.bgm_audio', 'project.voice_reference', 'project.voice_reference'])
 
-    for (const where of calledWhere) {
-      expect(where.userId).toBe('user-1')
-      expect(where.resourceKind).toBe('file')
-      expect(where.deletedAt).toBe(null)
-      expect(where.AND).toEqual([
+    for (const call of calls) {
+      expect(call.where.userId).toBe('user-1')
+      expect(call.where.resourceKind).toBe('file')
+      expect(call.where.deletedAt).toBe(null)
+      expect(call.where.AND).toEqual([
         { modelKey: { not: null } },
-        { modelKey: { not: where.mediaType === 'audio' && where.schemaId === 'project.bgm_audio'
-          ? 'fal::music/new'
-          : where.mediaType === 'audio'
-            ? 'elevenlabs::voice/new'
-            : where.mediaType === 'image'
-              ? 'openrouter::img/new'
-              : 'fal::video/new' } },
+        {
+          modelKey: {
+            not: call.where.mediaType === 'audio'
+              ? call.where.schemaId === 'project.bgm_audio'
+                ? 'fal::music/new'
+                : 'elevenlabs::voice/new'
+              : call.where.mediaType === 'image'
+                ? 'openrouter::img/new'
+                : 'fal::video/new',
+          },
+        },
       ])
+      expect(call.data).toEqual({
+        modelKey: call.where.mediaType === 'audio'
+          ? call.where.schemaId === 'project.bgm_audio'
+            ? 'fal::music/new'
+            : 'elevenlabs::voice/new'
+          : call.where.mediaType === 'image'
+            ? 'openrouter::img/new'
+            : 'fal::video/new',
+      })
     }
-    expect(updateMany.mock.calls[0][0].data).toEqual({ modelKey: 'openrouter::img/new' })
+    const projectIds = new Set(calls.map((call) => call.where.projectId))
+    expect(projectIds).toEqual(new Set(['project-1', 'project-2']))
+    // Each changed project advances its canvas revision.
+    expect(projectUpdate).toHaveBeenCalledTimes(8)
+    expect(projectUpdate.mock.calls[0][0]).toMatchObject({
+      where: { id: 'project-1', userId: 'user-1' },
+      data: { workspaceResourceRevision: { increment: 1 } },
+    })
   })
 
   it('leaves slots without a target untouched', async () => {
-    const updateMany = vi.fn(async (call: { where: Prisma.WorkspaceResourceWhereInput; data: unknown }) => ({ count: 0 }))
-    const client = { workspaceResource: { updateMany } } as unknown as Pick<Prisma.TransactionClient, 'workspaceResource'>
-    const counts = await backfillWorkspaceResourceModels('user-1', { video: 'fal::video/new' }, client)
-    expect(counts).toEqual({ image: 0, video: 0, music: 0, voice: 0 })
+    const { client, updateMany, projectUpdate } = fakeClient(['project-1'])
+    const counts = await backfillWorkspaceResourceModels(
+      'user-1',
+      { video: 'fal::video/new' },
+      client as unknown as Prisma.TransactionClient,
+    )
+    expect(counts).toEqual({ image: 0, video: 1, music: 0, voice: 0 })
     expect(updateMany).toHaveBeenCalledTimes(1)
-    expect(updateMany.mock.calls[0][0].where.mediaType).toBe('video')
+    expect((updateMany.mock.calls[0][0].where.mediaType as string)).toBe('video')
+    expect(projectUpdate).toHaveBeenCalledTimes(1)
+  })
+
+  it('skips revision bumps when nothing changed in a project', async () => {
+    const { client, projectUpdate } = fakeClient(['project-1'])
+    const noopClient = {
+      workspaceResource: {
+        findMany: vi.fn(async () => [{ projectId: 'project-1' }]),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
+      project: { update: projectUpdate },
+    }
+    const counts = await backfillWorkspaceResourceModels(
+      'user-1',
+      { image: 'openrouter::img/new' },
+      noopClient as unknown as Prisma.TransactionClient,
+    )
+    expect(counts).toEqual({ image: 0, video: 0, music: 0, voice: 0 })
+    expect(projectUpdate).not.toHaveBeenCalled()
+    expect(client).toBeDefined()
   })
 })

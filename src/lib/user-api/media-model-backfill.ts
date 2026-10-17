@@ -5,6 +5,7 @@ import {
   type MediaModelType,
 } from '@/lib/ai-registry/media-model-selection'
 import { WORKSPACE_RESOURCE_SCHEMA } from '@/lib/workspace-resource/schema-registry'
+import { backfillWorkspaceResourceModelKeysInTransaction } from '@/lib/workspace-resource/persistence'
 import { filterEffectiveModels } from './effective-config'
 import type { StoredModel, StoredProvider } from './api-config-types'
 
@@ -41,43 +42,34 @@ export function hasMediaModelBackfillTargets(targets: MediaModelBackfillTargets)
   return MEDIA_MODEL_TYPES.some((type) => typeof targets[type] === 'string')
 }
 
-type WorkspaceResourceDbClient = Pick<Prisma.TransactionClient, 'workspaceResource'>
-
 /**
  * 把用户已有场景的 modelKey 批量替换为当前槽位模型。
  * 只动“生成类”资源：图片/视频按 mediaType 命中；音乐/声音是同一
  * mediaType='audio'，按 schemaId 区分（bgm_audio=音乐，voice_reference=声音）。
  * 上传、文本、文件夹等没有生成模型语义的行不受影响。
+ * 写操作统一走 workspace-resource persistence 所有者，并在受影响项目上
+ * 推进画布修订号，让打开的编辑器重新拉取。
  */
 export async function backfillWorkspaceResourceModels(
   userId: string,
   targets: MediaModelBackfillTargets,
-  client: WorkspaceResourceDbClient,
+  client: Prisma.TransactionClient,
 ): Promise<Record<MediaModelType, number>> {
   const counts: Record<MediaModelType, number> = { image: 0, video: 0, music: 0, voice: 0 }
   for (const type of MEDIA_MODEL_TYPES) {
     const modelKey = targets[type]
     if (!modelKey) continue
-    const where: Prisma.WorkspaceResourceWhereInput = {
+    const scope = type === 'music'
+      ? { mediaType: 'audio' as const, schemaId: WORKSPACE_RESOURCE_SCHEMA.BGM_AUDIO }
+      : type === 'voice'
+        ? { mediaType: 'audio' as const, schemaId: WORKSPACE_RESOURCE_SCHEMA.VOICE_REFERENCE }
+        : { mediaType: type }
+    const changed = await backfillWorkspaceResourceModelKeysInTransaction(client, {
       userId,
-      resourceKind: 'file',
-      deletedAt: null,
-      AND: [
-        { modelKey: { not: null } },
-        { modelKey: { not: modelKey } },
-      ],
-    }
-    if (type === 'music') {
-      where.mediaType = 'audio'
-      where.schemaId = WORKSPACE_RESOURCE_SCHEMA.BGM_AUDIO
-    } else if (type === 'voice') {
-      where.mediaType = 'audio'
-      where.schemaId = WORKSPACE_RESOURCE_SCHEMA.VOICE_REFERENCE
-    } else {
-      where.mediaType = type
-    }
-    const result = await client.workspaceResource.updateMany({ where, data: { modelKey } })
-    counts[type] = result.count
+      ...scope,
+      modelKey,
+    })
+    counts[type] = changed.reduce((sum, row) => sum + row.count, 0)
   }
   return counts
 }
