@@ -19,8 +19,7 @@ export function ProviderBaseFields({ provider, t, state, onUpdateBaseUrl }: Prov
 
   useEffect(() => {
     if (!editingBaseUrl) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- Keep the
-      // draft synchronized after a successful provider URL save or reload.
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- 保存/重载后同步 URL 草稿。
       setTempBaseUrl(provider.baseUrl ?? '')
     }
   }, [editingBaseUrl, provider.baseUrl])

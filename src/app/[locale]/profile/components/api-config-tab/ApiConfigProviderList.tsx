@@ -115,12 +115,12 @@ export function ApiConfigProviderList(props: ApiConfigProviderListProps) {
 
   useEffect(() => {
     if (!channelDraft.baseUrl && openRouterProvider?.baseUrl) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- Fill the
-      // channel form default after the catalog provider arrives asynchronously.
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- 目录渠道到达后一次性回填表单默认值。
       setChannelDraft((previous) => ({ ...previous, baseUrl: openRouterProvider.baseUrl ?? '' }))
     }
   }, [channelDraft.baseUrl, openRouterProvider?.baseUrl])
 
+  /* eslint-disable react-hooks/preserve-manual-memoization -- 渠道目录的模型类型小数组，保持手写 memo。 */
   const openRouterTypeOptions: UnifiedModelType[] = useMemo(
     () => (openRouterProvider?.modelTypes?.length
       ? [...openRouterProvider.modelTypes]
@@ -133,6 +133,7 @@ export function ApiConfigProviderList(props: ApiConfigProviderListProps) {
       : ['llm']),
     [openAiCompatProvider?.modelTypes],
   )
+  /* eslint-enable react-hooks/preserve-manual-memoization */
   const modelTypeLabels = useMemo(() => {
     const labelMap: Partial<Record<UnifiedModelType, string>> = {}
     for (const type of MODEL_SLOT_TYPES) {

@@ -217,9 +217,11 @@ export default function SetupPage() {
   const lastProbeHost = useRef('')
 
   useEffect(() => {
-    const query = new URLSearchParams(window.location.search)
-    const token = query.get('token')
-    if (token) setForm((prev) => ({ ...prev, token }))
+    const token = new URLSearchParams(window.location.search).get('token')
+    if (token) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- 仅挂载后读取 URL 中的 setup token（避免水合不一致）。
+      setForm((prev) => (prev.token === token ? prev : { ...prev, token }))
+    }
   }, [])
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {

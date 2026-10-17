@@ -37,11 +37,12 @@ interface FakeCall {
 }
 
 function fakeClient(projectIds: string[]) {
-  const updateMany = vi.fn(async (_args: { where: Prisma.WorkspaceResourceWhereInput; data: Record<string, unknown> }) => ({
-    count: 1,
-  }))
+  const updateMany = vi.fn(async (args: { where: Prisma.WorkspaceResourceWhereInput; data: Record<string, unknown> }) => {
+    void args
+    return { count: 1 }
+  })
   const findMany = vi.fn(async () => projectIds.map((projectId) => ({ projectId })))
-  const projectUpdate = vi.fn(async (_args: { where: { id: string; userId: string }; data: Record<string, unknown>; select: Record<string, boolean> }) => ({ workspaceResourceRevision: 7 }))
+  const projectUpdate = vi.fn(async (args: { where: { id: string; userId: string }; data: Record<string, unknown>; select: Record<string, boolean> }) => { void args; return { workspaceResourceRevision: 7 } })
   const client = {
     workspaceResource: { findMany, updateMany },
     project: { update: projectUpdate },
