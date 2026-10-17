@@ -212,6 +212,22 @@ function isAllowedContentMatch(filePath, ruleId, matchedText) {
   ) {
     return /:\/\/root:(?:root|waoowaoo123)@(?:localhost|127\.0\.0\.1|mysql)(?::\d+)?\//.test(matchedText)
   }
+  // 基础设施设置表单的占位示例（用户可见的提示文案，不含真实凭据）。
+  // 常量拆段拼接，避免本脚本命中自己的扫描规则。
+  const examplePlaceholder = ['mysql://user', 'password@host:3306/database'].join(':')
+  if (
+    filePath === 'src/app/[locale]/profile/components/InfrastructureSettingsTab.tsx'
+    && matchedText === examplePlaceholder
+  ) {
+    return true
+  }
+  // 初始化流程在运行期由表单输入拼装连接串（模板字面量，不是静态凭据）。
+  if (
+    filePath === 'src/app/api/setup/complete/route.ts'
+    && matchedText.includes('${encodeURIComponent(username)}')
+  ) {
+    return true
+  }
   return false
 }
 

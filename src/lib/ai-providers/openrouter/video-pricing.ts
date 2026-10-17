@@ -29,17 +29,41 @@ export const OPENROUTER_SEEDANCE_2_5_PRICING = {
 // Frame modes are mutually exclusive with references and contain at most two
 // images, so their images never cross the free threshold. Freeze the entire
 // request price rather than multiplying the image surcharge by video duration.
+function hailuo3Tiers(resolutions: readonly string[], perSecond: number, perImage: number) {
+  const tiers: Array<{
+    when: { resolution: string; duration: number; referenceImageCount: number; containsVideoInput: false }
+    amount: number
+  }> = []
+  for (const duration of OPENROUTER_HAILUO_DURATION_OPTIONS) {
+    for (let referenceImageCount = 0; referenceImageCount <= OPENROUTER_HAILUO_3_MAX_REFERENCE_IMAGES; referenceImageCount += 1) {
+      for (const resolution of resolutions) {
+        tiers.push({
+          when: { resolution, duration, referenceImageCount, containsVideoInput: false },
+          amount: duration * perSecond + Math.max(referenceImageCount - 5, 0) * perImage,
+        })
+      }
+    }
+  }
+  return tiers
+}
+
 export const OPENROUTER_HAILUO_PRICING_CATALOG_ENTRIES = [
   {
     apiType: 'video', provider: 'openrouter', modelId: OPENROUTER_HAILUO_3_VIDEO_MODEL_ID,
+    // The H3 SKU is one flat per-second rate (plus the image surcharge), so
+    // every advertised resolution carries the same quote; the catalog must
+    // cover the whole offered surface or the availability projection drops
+    // the unpriced combinations.
     cost: {
       mode: 'capability', unit: 'per_call',
-      tiers: OPENROUTER_HAILUO_DURATION_OPTIONS.flatMap((duration) => Array.from({
-        length: OPENROUTER_HAILUO_3_MAX_REFERENCE_IMAGES + 1,
-      }, (_, referenceImageCount) => ({
-        when: { resolution: '2K', duration, referenceImageCount, containsVideoInput: false },
-        amount: usdToCredits(duration * 0.13 + Math.max(referenceImageCount - 5, 0) * 0.04),
-      }))),
+      tiers: hailuo3Tiers(['480p', '768p', '2K'], usdToCredits(0.13), usdToCredits(0.04)),
+    },
+    // Retail keeps the flat-per-second shape but at product rates (12 credits
+    // per output second, 4 credits per extra reference image) that clear the
+    // margin floor at the deepest plan discount.
+    retail: {
+      mode: 'capability', unit: 'per_call',
+      tiers: hailuo3Tiers(['480p', '768p', '2K'], 12, 4),
     },
   },
   {
@@ -49,6 +73,15 @@ export const OPENROUTER_HAILUO_PRICING_CATALOG_ENTRIES = [
       tiers: [
         { when: { resolution: '480p', containsVideoInput: false }, amount: usdToCredits(0.05) },
         { when: { resolution: '768p', containsVideoInput: false }, amount: usdToCredits(0.08) },
+      ],
+    },
+    // Retail mirrors the cost structure at product rates that clear the
+    // margin floor at the deepest plan discount.
+    retail: {
+      mode: 'capability', unit: 'per_second',
+      tiers: [
+        { when: { resolution: '480p', containsVideoInput: false }, amount: 5 },
+        { when: { resolution: '768p', containsVideoInput: false }, amount: 8 },
       ],
     },
   },

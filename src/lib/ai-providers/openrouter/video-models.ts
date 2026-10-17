@@ -76,6 +76,14 @@ const HAILUO_CAPABILITIES = {
   maxReferenceFiles: OPENROUTER_HAILUO_3_MAX_REFERENCE_IMAGES,
 } satisfies VideoCapabilities
 
+// H3 Max only lists 480p/768p pricing SKUs, so 2K stays out of its offer
+// (same rule as Seedance 2.5: advertised-but-unpriced resolutions are not
+// capabilities). The base H3 keeps the full surface at one flat per-second rate.
+const HAILUO_3_MAX_CAPABILITIES: VideoCapabilities = {
+  ...HAILUO_CAPABILITIES,
+  resolutionOptions: ['480p', '768p'],
+}
+
 const SEEDANCE_2_CAPABILITIES = {
   supportedInputModes: ['text_to_video', 'first_frame', 'first_last_frame', 'reference'],
   supportsTextToVideo: true,
@@ -145,7 +153,7 @@ export const OPENROUTER_VIDEO_MODELS: readonly OpenRouterVideoModel[] = [
     ...HAILUO_WIRE_OPTIONS,
     name: 'MiniMax H3 Max',
     aspectRatios: HAILUO_ASPECT_RATIOS,
-    capabilities: HAILUO_CAPABILITIES,
+    capabilities: HAILUO_3_MAX_CAPABILITIES,
   },
 ]
 

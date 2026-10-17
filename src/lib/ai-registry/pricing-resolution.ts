@@ -136,4 +136,4 @@ export function resolveBuiltinPricing(input: {
  * Built-in pricing catalog version stamped onto billing records for
  * traceability. Bump it whenever a registered price changes semantically.
  */
-export const BUILTIN_PRICING_VERSION = '2026-09-05'
+export const BUILTIN_PRICING_VERSION = '2026-10-17'
