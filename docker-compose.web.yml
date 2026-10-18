@@ -36,6 +36,12 @@ services:
       CODEX_RUNTIME_BUILD_CONTEXT: /app
       CODEX_RUNTIME_BUILD_IMAGE: waoowaoo-codex-runtime:local
       CODEX_RUNTIME_IMAGE: waoowaoo-codex-runtime:local
+      # Provider-side async job budgets (video generation on a local ComfyUI
+      # shim can run for hours). Defaults mirror the code defaults (20min
+      # running / 30min queued / 3s poll); override in .env for this deployment.
+      PROVIDER_GENERATION_TIMEOUT_MS: ${PROVIDER_GENERATION_TIMEOUT_MS:-1200000}
+      PROVIDER_QUEUE_TIMEOUT_MS: ${PROVIDER_QUEUE_TIMEOUT_MS:-1800000}
+      PROVIDER_POLL_INTERVAL_MS: ${PROVIDER_POLL_INTERVAL_MS:-3000}
     volumes:
       - ./data:/app/data
       - ./docker-logs:/app/logs
@@ -70,6 +76,12 @@ services:
       # Kept in sync with the Web container so an on-demand Codex runtime
       # rebuild inside the worker does not stall on deb.debian.org.
       CODEX_APT_MIRROR: ${CODEX_APT_MIRROR:-}
+      # Provider-side async job budgets (video generation on a local ComfyUI
+      # shim can run for hours). Defaults mirror the code defaults (20min
+      # running / 30min queued / 3s poll); override in .env for this deployment.
+      PROVIDER_GENERATION_TIMEOUT_MS: ${PROVIDER_GENERATION_TIMEOUT_MS:-1200000}
+      PROVIDER_QUEUE_TIMEOUT_MS: ${PROVIDER_QUEUE_TIMEOUT_MS:-1800000}
+      PROVIDER_POLL_INTERVAL_MS: ${PROVIDER_POLL_INTERVAL_MS:-3000}
     volumes:
       - ./data:/app/data
       - ./docker-logs:/app/logs
