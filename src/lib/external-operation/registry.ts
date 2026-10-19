@@ -2,6 +2,7 @@ export const EXTERNAL_OPERATION = {
   ASSISTANT_FOLLOW_UP_DELIVERY: 'assistant.follow-up-delivery',
   DATABASE_READ: 'database.read',
   MEDIA_DOWNLOAD: 'media.download',
+  MEDIA_DOWNLOAD_DNS: 'media.download-dns',
   MEDIA_DOWNLOAD_POLICY: 'media.download-policy',
   PROVIDER_CANCEL: 'provider.cancel',
   PROVIDER_POLL: 'provider.poll',
@@ -52,6 +53,14 @@ export const EXTERNAL_OPERATION_REGISTRY = {
     taskReplay: 'safe',
   },
   [EXTERNAL_OPERATION.MEDIA_DOWNLOAD]: {
+    maxAttempts: 3,
+    baseDelayMs: 2_000,
+    maxDelayMs: 8_000,
+    replay: 'idempotent',
+    effectOnFailure: 'none',
+    taskReplay: 'safe',
+  },
+  [EXTERNAL_OPERATION.MEDIA_DOWNLOAD_DNS]: {
     maxAttempts: 3,
     baseDelayMs: 2_000,
     maxDelayMs: 8_000,

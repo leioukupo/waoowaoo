@@ -3,6 +3,7 @@ import { lookup } from 'node:dns/promises'
 import { Agent, type Dispatcher } from 'undici'
 import { createFailureRecord, type FailureRecord } from '@/lib/errors/failure'
 import { EXTERNAL_OPERATION } from '@/lib/external-operation/registry'
+import { createScopedLogger } from '@/lib/logging/core'
 
 const DEFAULT_MAX_REDIRECTS = 3
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
@@ -50,7 +51,11 @@ export class OutboundMediaSecurityError extends Error {
       },
       details: { reasonCode: code },
       context: { system: 'application', phase: 'outbound-media-policy' },
-      operation: EXTERNAL_OPERATION.MEDIA_DOWNLOAD_POLICY,
+      // DNS failures are transient (resolver/proxy congestion); the other
+      // policy rejections are deterministic and stay non-retryable.
+      operation: code === 'OUTBOUND_MEDIA_DNS_FAILED'
+        ? EXTERNAL_OPERATION.MEDIA_DOWNLOAD_DNS
+        : EXTERNAL_OPERATION.MEDIA_DOWNLOAD_POLICY,
     })
   }
 }
@@ -188,12 +193,17 @@ function isTransparentProxyFakeIp(address: string): boolean {
     && isIpv4InRange(address, '198.18.0.0', 15)
 }
 
+const TRUSTED_DNS_MAX_ATTEMPTS = 3
+const TRUSTED_DNS_RETRY_DELAY_MS = 2_000
+const trustedDnsLogger = createScopedLogger({ module: 'media.outbound-fetch' })
+
 async function resolveAddressesThroughTrustedDns(
   hostname: string,
   family?: number,
 ): Promise<ResolvedAddress[]> {
   const recordTypes = family === 4 ? ['A'] : family === 6 ? ['AAAA'] : ['A', 'AAAA']
-  const results = await Promise.allSettled(recordTypes.map(async (recordType) => {
+  for (let attempt = 1; attempt <= TRUSTED_DNS_MAX_ATTEMPTS; attempt += 1) {
+    const results = await Promise.allSettled(recordTypes.map(async (recordType) => {
     const url = new URL(TRUSTED_DNS_JSON_ENDPOINT)
     url.searchParams.set('name', hostname)
     url.searchParams.set('type', recordType)
@@ -230,10 +240,23 @@ async function resolveAddressesThroughTrustedDns(
       }
       return [{ address: record.data, family: addressFamily }]
     })
-  }))
-  return results.flatMap((result) => (
-    result.status === 'fulfilled' ? result.value : []
-  ))
+    }))
+    const addresses = results.flatMap((result) => (
+      result.status === 'fulfilled' ? result.value : []
+    ))
+    if (addresses.length > 0) {
+      return addresses
+    }
+    if (attempt < TRUSTED_DNS_MAX_ATTEMPTS) {
+      await new Promise((resolve) => setTimeout(resolve, TRUSTED_DNS_RETRY_DELAY_MS))
+    }
+  }
+  trustedDnsLogger.warn({
+    action: 'outbound_media.trusted_dns_unresolved',
+    message: 'trusted DNS returned no A/AAAA address for outbound media host',
+    details: { hostname, recordTypes },
+  })
+  return []
 }
 
 async function resolvePublicAddresses(hostname: string, family?: number): Promise<ResolvedAddress[]> {
