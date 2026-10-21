@@ -165,7 +165,7 @@ INFRA_BIND_ADDRESS=0.0.0.0                 # 端口对外（默认 127.0.0.1）
 TEMPORAL_HOST_PORT=7233                    # 与外部/独立 Temporal 保持一致
 ```
 
-然后照常 `wao up -d`。Compose 会额外起 `temporal`（服务器）与 `temporal-config`（写一个 2 行动态配置的一次性容器）。两个前提：① Temporal 容器所在网络要能路由到 Postgres 与 Elasticsearch（web-only overlay 默认把 `temporal` 挂到 `1panel-network` 与 `temporal-network` 两个外部网络，按你的实际网络调整）；② 发布端口沿用 7233，所以应用/Worker 侧的 Temporal 地址无需改动。不想要这个容器时，把 `COMPOSE_PROFILES` 去掉即可回到 2 容器默认路径。
+然后照常 `wao up -d`。Compose 会额外起 `temporal`（服务器）、`temporal-elasticsearch`（可见性，命名卷存数据）与 `temporal-config`（写一个 2 行动态配置的一次性容器）。三个前提：① Temporal 容器所在网络要能路由到 Postgres 与 Elasticsearch（web-only overlay 默认把 `temporal` 挂到 `1panel-network` 与 `temporal-network` 两个外部网络，`temporal-elasticsearch` 挂在 `temporal-network`，按你的实际网络调整）；② 发布端口沿用 7233，所以应用/Worker 侧的 Temporal 地址无需改动；③ `TEMPORAL_PG_SEEDS` / `TEMPORAL_ES_SEEDS` 都写**容器名**（`1Panel-postgresql-Uy1Y` / `temporal-elasticsearch`）——Temporal 容器挂在对应网络上，走 Docker DNS 解析，主机重启导致 IP 漂移不用管；若 1Panel 里重建了 Postgres 服务（容器名变化），才需要更新 seed。不想要这些容器时，把 `COMPOSE_PROFILES` 去掉即可回到 2 容器默认路径。
 
 ---
 
@@ -176,6 +176,8 @@ TEMPORAL_HOST_PORT=7233                    # 与外部/独立 Temporal 保持一
 ```sh
 alias wao='docker compose -f docker-compose.yml -f docker-compose.web.yml'
 ```
+
+> ⚠️ 只用 `docker-compose.web.yml` 一个文件执行 `up`（不带基础文件）会把 app 重建成**没有端口映射**的容器（web overlay 里不定义 `ports`，端口映射来自基础文件），表现为站点突然打不开、容器却显示 Up。遇到这种情况执行 `wao up -d app` 重建即可恢复。
 
 **常用命令**
 

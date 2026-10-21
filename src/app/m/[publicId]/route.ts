@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
   getMediaObjectDelivery,
+  getObjectBuffer,
   getObjectMetadata,
   getObjectStream,
   getSignedObjectUrl,
 } from '@/lib/storage'
 import { authorizeMediaObjectRead } from '@/lib/media/storage-access-policy'
 import { apiHandler } from '@/lib/api-errors'
+import { createScopedLogger } from '@/lib/logging/core'
 
 export const runtime = 'nodejs'
 
@@ -18,6 +20,55 @@ export const runtime = 'nodejs'
 const MEDIA_SIGNED_URL_EXPIRES_SECONDS = 60 * 60
 const MEDIA_CACHE_MAX_AGE_SECONDS = 55 * 60
 const MEDIA_CACHE_CONTROL = `private, max-age=${MEDIA_CACHE_MAX_AGE_SECONDS}, immutable`
+
+/**
+ * Some object-storage implementations (notably certain RustFS alpha builds)
+ * answer ranged GETs with a broken response: they promise the full object
+ * length, send zero bytes, and reset the socket. Browsers can never play
+ * media over such a connection because their demuxers fetch data by ranges.
+ * When a ranged read comes back short or errors, we transparently re-read
+ * the whole object and slice out the requested range. Objects above this
+ * size are streamed as-is because buffering them is not worth the memory.
+ */
+const RANGE_FALLBACK_MAX_OBJECT_BYTES = 512 * 1024 * 1024
+
+const mediaDeliveryLogger = createScopedLogger({ module: 'media.delivery' })
+
+async function readWebStreamToBuffer(
+  body: ReadableStream<Uint8Array>,
+  maxBytes: number,
+): Promise<Buffer> {
+  const reader = body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined)
+      throw new Error('MEDIA_RANGE_STREAM_EXCEEDS_LIMIT')
+    }
+    chunks.push(value)
+  }
+  return Buffer.concat(chunks)
+}
+
+function bufferToReadableStream(buffer: Buffer): ReadableStream<Uint8Array> {
+  let offset = 0
+  return new ReadableStream({
+    pull(controller) {
+      const chunkSize = 256 * 1024
+      if (offset < buffer.length) {
+        const next = offset + chunkSize
+        controller.enqueue(new Uint8Array(buffer.subarray(offset, next)))
+        offset = next
+      } else {
+        controller.close()
+      }
+    },
+  })
+}
 
 function buildEtag(media: { sha256?: string | null; id: string; updatedAt?: string | Date | null }) {
   if (media.sha256) return `"${media.sha256}"`
@@ -119,25 +170,82 @@ export const GET = apiHandler(async (
 
     const range = parseByteRange(requestedRange, totalBytes)
     if (range.kind === 'invalid') return rangeNotSatisfiable(totalBytes)
-    const object = await getObjectStream(
-      media.storageKey,
-      range.kind === 'valid' ? { start: range.start, end: range.end } : undefined,
-    )
     const headers = new Headers()
     headers.set('Accept-Ranges', 'bytes')
     headers.set('Cache-Control', MEDIA_CACHE_CONTROL)
     headers.set('ETag', etag)
-    headers.set('Content-Type', object.contentType || metadataContentType || media.mimeType || 'application/octet-stream')
+
     if (range.kind === 'valid') {
-      headers.set('Content-Length', String(range.end - range.start + 1))
+      const expected = range.end - range.start + 1
+      const streamDirectly = totalBytes > RANGE_FALLBACK_MAX_OBJECT_BYTES
+      let data: Buffer | null = null
+      let contentType: string | null = metadataContentType || media.mimeType || null
+
+      if (streamDirectly) {
+        // Too large to buffer: keep the original zero-copy behavior.
+        const object = await getObjectStream(
+          media.storageKey,
+          { start: range.start, end: range.end },
+        )
+        contentType = object.contentType || contentType
+        headers.set('Content-Type', contentType || 'application/octet-stream')
+        headers.set('Content-Length', String(expected))
+        headers.set('Content-Range', `bytes ${String(range.start)}-${String(range.end)}/${String(totalBytes)}`)
+        return new Response(object.body, { status: 206, headers })
+      }
+
+      try {
+        const object = await getObjectStream(
+          media.storageKey,
+          { start: range.start, end: range.end },
+        )
+        contentType = object.contentType || contentType
+        const fetched = await readWebStreamToBuffer(object.body, totalBytes)
+        if (object.contentRange) {
+          // A compliant 206: the body is exactly the requested slice.
+          if (fetched.length === expected) data = fetched
+        } else if (fetched.length >= range.end + 1) {
+          // The server ignored the Range header and returned the object
+          // from byte zero: slice out what was requested.
+          data = fetched.subarray(range.start, range.start + expected)
+        }
+        if (!data) {
+          mediaDeliveryLogger.warn('Ranged object read came back short; retrying full read', {
+            action: 'MEDIA_RANGE_FALLBACK',
+            publicId: media.publicId,
+            rangeStart: range.start,
+            rangeEnd: range.end,
+            fetchedBytes: fetched.length,
+          })
+        }
+      } catch (error) {
+        mediaDeliveryLogger.warn('Ranged object read failed; retrying full read', {
+          action: 'MEDIA_RANGE_FALLBACK',
+          publicId: media.publicId,
+          rangeStart: range.start,
+          rangeEnd: range.end,
+          reason: error instanceof Error ? error.message : String(error),
+        })
+      }
+
+      if (!data) {
+        const full = await getObjectBuffer(media.storageKey)
+        if (full.length < range.end + 1) {
+          throw new Error('MEDIA_RANGE_FALLBACK_TRUNCATED')
+        }
+        data = full.subarray(range.start, range.start + expected)
+      }
+
+      headers.set('Content-Type', contentType || 'application/octet-stream')
+      headers.set('Content-Length', String(expected))
       headers.set('Content-Range', `bytes ${String(range.start)}-${String(range.end)}/${String(totalBytes)}`)
-    } else {
-      headers.set('Content-Length', String(totalBytes))
+      return new Response(bufferToReadableStream(data), { status: 206, headers })
     }
-    return new Response(object.body, {
-      status: range.kind === 'valid' ? 206 : 200,
-      headers,
-    })
+
+    const object = await getObjectStream(media.storageKey)
+    headers.set('Content-Type', object.contentType || metadataContentType || media.mimeType || 'application/octet-stream')
+    headers.set('Content-Length', String(totalBytes))
+    return new Response(object.body, { status: 200, headers })
   }
 
   const signedUrl = await getSignedObjectUrl(media.storageKey, {

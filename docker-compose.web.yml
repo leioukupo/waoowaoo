@@ -135,11 +135,48 @@ services:
     # 由 .env 设为 0.0.0.0:7233（对外可访问，与独立容器一致）。
     # 动态配置用服务器内嵌默认值（原 dev-sql 仅 maxIDLength 与一个 dev 缓存开关，
     # 复用既有数据用不上），故不挂自定义目录、不设 DYNAMIC_CONFIG_FILE_PATH。
-    # 主存储(1Panel Postgres, 172.18.0.4)与可见性 ES(172.28.0.3)分属两个外部
-    # 网络，waoowaoo_default 路由不到它们，故 temporal 额外挂上这两个网络；
+    # 主存储(1Panel Postgres)与可见性 ES 分属两个外部网络，waoowaoo_default
+    # 路由不到它们，故 temporal 额外挂上这两个网络；两者都按容器名寻址
+    # (1Panel-postgresql-Uy1Y / temporal-elasticsearch)，走 Docker DNS，
+    # 主机重启 IP 漂移不用管（.env 的 seed 变了容器名才要改）。
     # app/worker 通过发布端口 192.168.31.9:7233 访问 Temporal，不依赖服务名。
     networks:
       - 1panel-network
+      - temporal-network
+
+  # 可选（profile: temporal-in-compose）：Temporal 可见性 Elasticsearch。
+  # 替代原先手工 docker run 的 temporal-elasticsearch（数据在可写层、
+  # restart=no，主机重启后不会自启）。服务名沿用 temporal-elasticsearch，
+  # .env 的 TEMPORAL_ES_SEEDS 不用改；数据放命名卷 temporal_es_data，
+  # 从旧容器迁移（备份在 /var/lib/wao/es-7.17/data）。
+  temporal-elasticsearch:
+    profiles: ["temporal-in-compose"]
+    image: elasticsearch:7.17.27
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms256m -Xmx256m"
+      cluster.routing.allocation.disk.threshold_enabled: "true"
+      cluster.routing.allocation.disk.watermark.low: "512mb"
+      cluster.routing.allocation.disk.watermark.high: "256mb"
+      cluster.routing.allocation.disk.watermark.flood_stage: "128mb"
+    ports:
+      - "0.0.0.0:9200:9200"
+    volumes:
+      - temporal_es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://127.0.0.1:9200/_cluster/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 30s
+    networks:
       - temporal-network
 
   # UI 依赖的 one-shot 属于 infra profile，这里解除依赖；
@@ -154,3 +191,6 @@ networks:
     external: true
   temporal-network:
     external: true
+
+volumes:
+  temporal_es_data:
